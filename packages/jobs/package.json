@@ -1,0 +1,30 @@
+{
+  "name": "@qmulate/jobs",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Typed job names, zod payload schemas, schedule metadata and the transport-agnostic JobQueue interface for the QMULATE worker — with an in-memory implementation on the barrel and the pg-boss transport (landed S10/T1, not Sprint 9 as once planned) behind the ./pgboss subpath so importing a payload schema never pulls in a queue driver.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./queue": "./src/queue.ts",
+    "./pgboss": "./src/pgboss.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:integration": "vitest run --mode integration"
+  },
+  "dependencies": {
+    "pg-boss": "^12.29.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/pg": "^8.20.0",
+    "pg": "^8.23.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}

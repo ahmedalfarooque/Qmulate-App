@@ -1,0 +1,15 @@
+# Project Moved
+
+**Date:** 2026-06-29
+**From:** `/Users/synrtechs/Documents/QMULATE`
+**To:** `/Users/synrtechs/Documents/Claude/Code-Projects/QMULATE`
+
+This project was moved during a Documents reorganization to consolidate all Claude Code projects under `Documents/Claude/Code-Projects/`.
+
+## Recovering Claude Code session memory
+
+Claude Code stores session memory keyed by the old absolute path. If you want prior context:
+```
+~/.claude/projects/
+```
+Look for a folder matching the old path hash. The project code and git history are fully intact.

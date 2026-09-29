@@ -1,0 +1,1107 @@
+{
+  "nav": {
+    "primaryLabel": "Primary navigation",
+    "dashboard": "Dashboard",
+    "endowments": "Endowments",
+    "beneficiaries": "Beneficiaries & UBO",
+    "distributions": "Distributions",
+    "compliance": "Compliance",
+    "calendar": "Calendar",
+    "financials": "Financials",
+    "documents": "Documents",
+    "approvals": "Approvals",
+    "auditLog": "Audit Log",
+    "onboarding": "Register an endowment"
+  },
+  "common": {
+    "appName": "QMULATE",
+    "skipToContent": "Skip to main content",
+    "mainContent": "Main content",
+    "loading": "Loading…",
+    "signIn": "Sign in",
+    "signOut": "Sign out",
+    "language": "Language",
+    "languageAr": "العربية",
+    "languageEn": "English",
+    "switchToArabic": "Switch to Arabic",
+    "switchToEnglish": "Switch to English",
+    "theme": "Theme",
+    "themeLight": "Light",
+    "themeDark": "Dark",
+    "themeReport": "Report",
+    "portfolioScope": "Portfolio",
+    "selectEndowment": "Select an endowment",
+    "client": "Client",
+    "waqif": "Waqif",
+    "endowment": "Endowment",
+    "allEndowments": "All endowments",
+    "search": "Search",
+    "searchPlaceholder": "Search endowments, beneficiaries, documents",
+    "close": "Close",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "save": "Save",
+    "retry": "Retry",
+    "back": "Back",
+    "next": "Next",
+    "previous": "Previous",
+    "menu": "Menu",
+    "openMenu": "Open menu",
+    "closeMenu": "Close menu",
+    "userMenu": "Account menu",
+    "notifications": "Notifications",
+    "hijri": "Hijri",
+    "gregorian": "Gregorian",
+    "currencyCode": "SAR",
+    "increase": "Increase",
+    "decrease": "Decrease",
+    "noChange": "No change",
+    "unverifiedFigure": "Unverified figure — confirm against primary law",
+    "required": "Required",
+    "yes": "Yes",
+    "no": "No",
+    "notRecorded": "Not recorded",
+    "notApplicable": "Not applicable",
+    "openRecord": "Open record",
+    "diagnosticCode": "Diagnostic code"
+  },
+  "auth": {
+    "signInTitle": "Sign in",
+    "signInSubtitle": "Enter your account details to continue.",
+    "createAccount": "Create an account",
+    "signInInstead": "Already have an account? Sign in",
+    "name": "Full name",
+    "email": "Email address",
+    "password": "Password",
+    "submit": "Continue",
+    "totpTitle": "Two-factor verification",
+    "totpCode": "Verification code",
+    "totpVerify": "Verify",
+    "totpEnrolTitle": "Set up two-factor verification",
+    "totpEnrolIntro": "Scan the QR code with your authenticator app, then enter the six-digit code.",
+    "totpEnrolRequired": "Two-factor verification is required for every account. You cannot reach the application until it is enabled.",
+    "backupCodes": "Recovery codes",
+    "backupCodesWarning": "Store these codes somewhere safe. They will not be shown again.",
+    "stepUpTitle": "Confirm your identity",
+    "stepUpIntro": "Re-enter your verification code to approve this action.",
+    "invalidCredentials": "That email address or password is incorrect.",
+    "invalidTotp": "That verification code is incorrect or has expired.",
+    "sessionExpired": "Your session has ended. Please sign in again.",
+    "signedOut": "You have been signed out."
+  },
+  "errors": {
+    "notFound": "Page not found",
+    "notFoundBody": "We could not find that page. Check the link, or return to the dashboard.",
+    "notAuthorized": "You do not have access",
+    "notAuthorizedBody": "This record is outside your access scope. Contact the Nazir to request access.",
+    "generic": "Something went wrong",
+    "genericBody": "The operation could not be completed. Try again, and report it to your administrator if it persists.",
+    "offline": "No network connection",
+    "offlineBody": "Check your connection and try again.",
+    "configMissing": "System configuration is incomplete",
+    "configMissingBody": "A required environment variable is not set. The application cannot start until it is.",
+    "domain": {
+      "SHART_INCOMPLETE": "The founder's conditions are incomplete or unclear, so the calculation was stopped. Nothing is estimated — the conditions must be resolved first.",
+      "SHART_IMMUTABLE": "The founder's conditions cannot be changed here. Any amendment is a reserved matter for the competent authority.",
+      "CORPUS_NOT_DISTRIBUTABLE": "This receipt is capital, not yield, so it cannot enter a distribution. Sale and substitution proceeds stay in the corpus.",
+      "RECEIPT_UNCLASSIFIED": "This receipt has not been classified as yield or capital. Classify it before it can be used.",
+      "CATEGORY_NOT_CAPTURED": "This beneficiary's category has not been recorded, so the line is withheld.",
+      "STALE_KYC": "This beneficiary's identity verification is out of date and must be renewed.",
+      "KYC_UNVERIFIED": "This beneficiary's identity has never been verified, so the line is withheld until it is.",
+      "ENTITY_UNLICENSED": "This entity is not licensed or cannot be verified as a payable counterparty.",
+      "CROSS_BORDER_PENDING": "This payment leaves the country and is waiting on its additional control.",
+      "DEATH_ALREADY_CERTIFIED": "A death is already certified on this record. Correcting a certification is a separate recorded act, not an overwrite.",
+      "DEATH_ON_NON_PERSON": "A death is recorded for a person; this beneficiary is a charity or a not-yet-identified class, which is retired by a separate, reversible act.",
+      "CATEGORY_ON_IDENTIFIED_MEMBER": "This beneficiary is individually identified; a category description applies to a not-yet-identified class or a charitable purpose.",
+      "RECONCILIATION_SCOPE_MIXED": "This reconciliation was given movements from more than one endowment or account, so it was stopped. Each endowment's dedicated account is reconciled on its own.",
+      "RECEIPT_CLASS_INCOHERENT": "A ledger entry's income-or-capital classification does not match whether it is money in or money out, so the reconciliation stopped rather than deciding which it is.",
+      "MONEY_NUMBER_INPUT": "An amount arrived in a form that loses precision. Amounts are handled as exact decimals.",
+      "MONEY_INVALID": "That amount is not a valid figure.",
+      "MONEY_PRECISION": "That amount has more decimal places than halalas allow. Round it explicitly.",
+      "MONEY_OVERFLOW": "That amount is larger than the ledger can record.",
+      "MONEY_NEGATIVE": "That amount cannot be negative.",
+      "INVALID_ALLOCATION_WEIGHTS": "The distribution shares are missing, negative, or do not add up. Correct them before distributing.",
+      "ALLOCATION_IMBALANCE": "The allocated amounts do not add up to the total. Nothing was distributed — please report this.",
+      "DISTRIBUTION_NEGATIVE": "The distribution would go below zero: the maintenance reserve, operating costs and Nazir fee together exceed this period's yield. No distribution was produced — the figures must be corrected first.",
+      "DISTRIBUTION_INPUT_INVALID": "The data supplied for this distribution is incomplete or inconsistent, so the calculation was stopped.",
+      "DISTRIBUTION_INVARIANT_BREACH": "An internal consistency check on this distribution failed. Nothing was distributed — please report this.",
+      "PERMISSION_INVALID": "That permission is not recognised, and an unrecognised permission grants nothing.",
+      "ROLE_UNKNOWN": "That role is not recognised, so no permission was granted.",
+      "PERMISSION_ESCALATION": "The requested permissions go beyond what the role allows. A grant may narrow a role, never widen it.",
+      "DELEGATION_NOT_DELEGABLE": "Approval and signature cannot be delegated. A delegate may initiate; only the Nazir approves.",
+      "SETTING_MISSING": "A required setting has not been configured, so the operation was refused rather than assume a value.",
+      "SETTING_INVALID": "A setting holds a value that cannot be used. It must be corrected before this can run.",
+      "CALENDAR_UNAVAILABLE": "The official working-day calendar is unavailable, so no due date was calculated.",
+      "DEADLINE_RULE_NOT_A_CLOCK": "This obligation does not carry a computable due date, so none was calculated. The refused binding is shown with the code.",
+      "DEADLINE_STATE_INCOHERENT": "This deadline's recorded facts contradict each other, so its status was not derived. The record must be corrected first.",
+      "DEADLINE_ANCHOR_NOT_DERIVABLE": "The date this obligation's clock starts from is not on record, so no due date was calculated. The reason is shown with the code.",
+      "DATE_INVALID": "That date is not a valid calendar date.",
+      "DATE_OUT_OF_RANGE": "That date falls outside the supported Umm al-Qura range, so it was not converted.",
+      "NAZIR_INELIGIBLE": "This trustee does not meet the eligibility conditions, so the appointment was not recorded. The unmet conditions are listed with the deed.",
+      "DEED_TERM_WRITE_ONCE": "This condition of the deed has already been recorded and cannot be changed. A correction is recorded as a superseding instrument — a new record — never as an edit to this one.",
+      "RESERVED_MATTER_REQUIRED": "This act is a reserved matter. It stays blocked until the Nazir approves a request that names this very subject."
+    },
+    "access": {
+      "UNAUTHENTICATED": "Your session has ended. Sign in again to continue.",
+      "TOTP_ENROLMENT_REQUIRED": "Two-factor verification must be set up before you can use the application.",
+      "TOTP_STEP_UP_REQUIRED": "Re-enter your verification code to confirm this action.",
+      "NO_GRANT": "That record was not found.",
+      "PERMISSION_DENIED": "You do not have permission for this action. Contact the Nazir if you need it.",
+      "SEGREGATION_OF_DUTIES": "You raised this request, so you cannot approve it. It needs a different Nazir.",
+      "APPROVAL_STALE": "This item changed after it was submitted, so the earlier approval no longer stands. Submit it again.",
+      "AML_COMPARTMENT_ONLY": "That record was not found.",
+      "SCOPE_REF_MISMATCH": "That record was not found.",
+      "RESERVED_MATTER_CHAIN_INCOMPLETE": "This reserved matter is missing a required approval step, so it cannot proceed.",
+      "GATE_NOT_CLEARED": "Your session could not be verified, so access was refused. Sign in again.",
+      "ONBOARDING_GATE_NOT_CLEARED": "This endowment has not cleared onboarding Gate 02 (Systems & Controls), so distributions and Authority filings are blocked until it does.",
+      "ENDOWMENT_INTAKE_NOT_AUTHORISED": "You are not authorised to register an endowment for this client: registering one needs both the endowment-record and access-matrix verbs on one of the client’s existing endowments.",
+      "FIXTURE_ONLY_IDENTIFIER_REFUSED": "This environment holds fixture data only. Identifiers must follow the fixture grammar (see the note on the intake form); real identifiers cannot be entered outside KSA-resident infrastructure."
+    }
+  },
+  "endowments": {
+    "title": "Endowments",
+    "intro": "Every endowment under trusteeship, grouped by the family that holds the engagement and the founder who established it.",
+    "empty": "No endowment is within your access scope",
+    "emptyBody": "Access is granted per endowment, never by job title. Contact the Nazir to have a grant issued.",
+    "tree": {
+      "label": "Client, founder and endowment hierarchy",
+      "clientLabel": "Client family",
+      "waqifLabel": "Founder",
+      "endowmentCount": "Endowments in scope",
+      "noWaqif": "No founder within your access scope holds an endowment here.",
+      "noEndowment": "This founder holds no endowment within your access scope."
+    },
+    "tabs": {
+      "record": "Record",
+      "deed": "Trusteeship deed",
+      "classification": "Classification",
+      "shart": "Founder's conditions",
+      "beneficiaries": "Beneficiaries",
+      "reserved": "Reserved matters",
+      "onboarding": "Onboarding"
+    },
+    "record": {
+      "title": "Endowment record",
+      "identityTitle": "Identity and registration",
+      "termsTitle": "Conditions carried on the deed",
+      "trusteeshipTitle": "Trusteeship",
+      "termsIntro": "These are conditions of the founder's deed, not settings. Each is recorded once and then read; a correction is a superseding instrument."
+    },
+    "fields": {
+      "client": "Client family",
+      "waqif": "Founder (waqif)",
+      "certificateNumber": "Waqf certificate number",
+      "deedNumber": "Waqf deed number",
+      "classification": "Authority classification",
+      "waqfType": "Endowment type",
+      "waqfNature": "Endowment nature",
+      "entitlementOrder": "Order of entitlement",
+      "continuationStipulation": "Line-continuation stipulation",
+      "reversion": "Ultimate taker (maal al-waqf)",
+      "registrationDate": "Registration date",
+      "certificateExpiry": "Certificate valid until",
+      "fiscalYearEnd": "Fiscal year end",
+      "shartVersion": "Conditions version",
+      "primaryNazir": "Primary Nazir",
+      "authorizedRep": "Authorized representative",
+      "jointlyLiable": "Jointly and severally liable",
+      "registrationAnchor": "Registration clock — start date",
+      "registrationAnchorKind": "Which date starts the clock"
+    },
+    "classificationValue": {
+      "LARGE": "Large",
+      "MEDIUM": "Medium",
+      "SMALL": "Small",
+      "NOT_CLASSIFIED": "Not yet classified"
+    },
+    "waqfTypeValue": {
+      "PUBLIC_CHARITABLE": "Public charitable (khayri)",
+      "FAMILY_DHURRI": "Family (dhurri)",
+      "JOINT": "Joint (mushtarak)"
+    },
+    "waqfNatureValue": {
+      "AYNI": "In-kind (ayni)",
+      "QIYAMI": "Value (qiyami)"
+    },
+    "entitlementOrderValue": {
+      "ORDERED": "Tiered — al-a'la fa-l-a'la",
+      "SHARED": "Shared — tashrik",
+      "LINEAGE_CONTINUATION": "Lineage continuation",
+      "NA_DIRECT_USE": "Not applicable — direct use of the asset"
+    },
+    "continuationValue": {
+      "ZUHUR_ONLY": "Sons' line only (zuhur)",
+      "ZUHUR_AND_BUTUN": "Sons' and daughters' lines (zuhur and butun)"
+    },
+    "reversionKindValue": {
+      "CHARITABLE_ULTIMATE_TAKER": "A named charitable jiha"
+    },
+    "assetStatusValue": {
+      "ACTIVE": "Active",
+      "FULLY_RENTED": "Fully rented",
+      "PARTIALLY_RENTED": "Partially rented",
+      "VACANT": "Vacant",
+      "EXPROPRIATED": "Expropriated by the state",
+      "SUBSTITUTED_ISTIBDAL": "Substituted (istibdal)"
+    },
+    "reversion": {
+      "notCaptured": "The deed's clause has not been read yet",
+      "notCapturedBody": "Nobody has recorded whether this deed names an ultimate taker. That is not the same as the deed naming none, and it is not treated as such: no distribution may be produced from this endowment until the clause is read and recorded.",
+      "recordsNone": "The deed records no ultimate taker",
+      "recordsNoneBody": "This is a positive statement read off the deed, not an omission.",
+      "takersTitle": "Named ultimate takers",
+      "takersBody": "A named taker receives nothing while the bloodline continues, and takes at the weight the deed stipulates rather than a per-head share.",
+      "recordedAt": "Clause recorded on"
+    },
+    "deed": {
+      "title": "Trusteeship deed",
+      "intro": "The appointment that makes the trusteeship lawful: who holds it, who may act under it, and on what liability.",
+      "notRecorded": "No trusteeship deed has been recorded for this endowment",
+      "notRecordedBody": "The appointment is what authorises every act of the trusteeship. Nothing is inferred from its absence.",
+      "primaryTitle": "Primary Nazir",
+      "appointedDate": "Appointed on",
+      "successorNazir": "Successor Nazir",
+      "repTitle": "Authorized representative",
+      "repNone": "No authorized representative is recorded on this deed.",
+      "repName": "Name",
+      "repScope": "Delegated scope",
+      "repAppointedDate": "Appointed on",
+      "jointLiabilityTitle": "Joint and several liability",
+      "jointLiabilityNote": "A delegated manager is jointly and severally liable with the Nazir.",
+      "repAuthorityNote": "A representative may initiate and act within the delegated scope. Approval and signature are not delegable: every act by the representative is recorded against the Nazir on whose behalf it was taken."
+    },
+    "eligibility": {
+      "title": "Eligibility",
+      "intro": "The conditions a trustee must meet before an appointment may be recorded. Each is captured and verified, never assumed.",
+      "eligible": "Meets the recorded conditions",
+      "blocked": "Blocked — a condition is not met",
+      "subjectPrimary": "Primary Nazir",
+      "subjectRepresentative": "Authorized representative",
+      "verifiedAt": "Verified on",
+      "verifiedBy": "Verified by",
+      "notVerified": "Not yet verified",
+      "notVerifiedBody": "The conditions have been captured but no verification has been recorded. Captured flags record a claim, not a verification.",
+      "criteriaTitle": "Conditions",
+      "satisfied": "Met",
+      "notSatisfied": "Not met",
+      "notAssessed": "Not assessed",
+      "notAssessedTitle": "Conditions nobody has assessed",
+      "reasonsTitle": "Why this is blocked",
+      "unknownReason": "This reason has no wording in this build. The machine code is shown so it can be reported rather than guessed at.",
+      "surfacedTitle": "Open questions carried with this verdict",
+      "applicability": {
+        "REQUIRED": "Binding",
+        "NOT_APPLICABLE": "Not binding here",
+        "UNDECIDED_SURFACED": "Unsettled — reported, and never treated as met"
+      },
+      "criteria": {
+        "ISLAM": "Muslim",
+        "LEGAL_CAPACITY": "Full legal capacity",
+        "NO_DISQUALIFYING_REMOVAL": "No disqualifying prior removal from a trusteeship",
+        "KSA_RESIDENCY": "Resident in the Kingdom",
+        "SAUDI_NATIONALITY_WHERE_REQUIRED": "Saudi national — where the founder is foreign and real property is held",
+        "AUTHORITY_LICENSED": "Licensed by the Authority — where the Nazir is a legal person"
+      },
+      "reasons": {
+        "ISLAM_REQUIRED": "The trustee must be a Muslim.",
+        "LEGAL_CAPACITY_REQUIRED": "The trustee must have full legal capacity.",
+        "DISQUALIFYING_REMOVAL_RECORDED": "A prior removal from a trusteeship is recorded against this trustee, and it disqualifies this appointment.",
+        "KSA_RESIDENCY_REQUIRED": "The trustee must be resident in the Kingdom.",
+        "SAUDI_NATIONALITY_REQUIRED": "This endowment's founder is foreign and it holds real property, so the trustee must be a Saudi national.",
+        "AUTHORITY_LICENCE_REQUIRED": "The trustee is a legal person, so it must hold a licence from the Authority.",
+        "ELIGIBILITY_NOT_ASSESSED": "A binding condition arrived unanswered. An unanswered condition is a refusal, never a pass.",
+        "REP_JOINT_LIABILITY_REQUIRED": "An authorized representative may only be recorded as jointly and severally liable with the Nazir.",
+        "REP_ELIGIBILITY_WITHOUT_REPRESENTATIVE": "An eligibility assessment was requested for an authorized representative, but no representative is currently recorded on this Waqf deed. This is a temporary status and will end when a representative is recorded or the request is withdrawn. It does not mean that a representative is required or should be appointed.",
+        "REP_ELIGIBILITY_NOT_ASSESSED": "A representative is recorded on the deed, but their eligibility has not yet been assessed or recorded. The status is temporary and will remain pending until the assessment is completed and recorded. This does not mean there is any issue or concern about the representative’s eligibility."
+      }
+    },
+    "classification": {
+      "title": "Classification",
+      "intro": "The Authority's classification decides which regulatory duties apply to this endowment.",
+      "currentTitle": "Recorded classification",
+      "bandsTitle": "The bands this classification comes from",
+      "bandsBody": "The value bands are configuration, not code: they are read from settings so a correction is a settings change.",
+      "bandsSettings": "Settings consulted",
+      "historyTitle": "Re-classification history",
+      "historyEmpty": "No re-classification has been recorded for this endowment.",
+      "historyNote": "The history is append-only at the database. A recorded transition cannot be edited or removed.",
+      "from": "From",
+      "to": "To",
+      "at": "On",
+      "reason": "Reason",
+      "by": "Recorded by",
+      "obligationsTitle": "Duties that apply at this classification",
+      "obligationsIntro": "Derived from the regulation's own catalogue and this endowment's recorded classification. The task instances and their statuses belong to the compliance module.",
+      "obligationsEmpty": "No duty in the catalogue applies at this classification.",
+      "excludedTitle": "Duties excluded by this classification",
+      "excludedIntro": "Shown rather than hidden, so the difference between one classification and another is visible on the record.",
+      "excludedEmpty": "No duty in the catalogue is excluded at this classification.",
+      "columnCode": "Code",
+      "columnObligation": "Duty",
+      "columnSection": "Workstream",
+      "columnGate": "Applies to",
+      "columnReason": "Excluded because",
+      "excludedReasonGate": "The classification falls outside this duty's gate",
+      "gate": {
+        "ALL": "Every classification",
+        "LARGE_MEDIUM": "Large and medium",
+        "SMALL_DIRECT": "Small and direct-benefit",
+        "EXCLUDE_DIRECT": "Excludes direct-utilization",
+        "HAS_INCOME": "Where income exists",
+        "LARGE_ONLY": "Large only"
+      },
+      "section": {
+        "FINANCIAL": "Financial",
+        "OPERATIONAL": "Operational",
+        "GOVERNMENT_LEGAL": "Government and legal"
+      }
+    },
+    "shart": {
+      "title": "The founder's conditions",
+      "intro": "What the founder instructed, as recorded. This screen is the record of it.",
+      "immutableTitle": "This record cannot be edited",
+      "immutableBody": "The founder's conditions are written once. No approval opens them — there is no such approval — and no correction, backfill or migration may alter them. That is the purpose of the record: to be what the founder instructed.",
+      "supersedingTitle": "If a correction is lawful, it is a new record",
+      "supersedingBody": "Where a competent authority or a court directs a change, the answer is a superseding instrument recorded as a new record alongside this one. The original stays exactly as it stands.",
+      "versionLabel": "Version",
+      "setAt": "Recorded on",
+      "structuredTitle": "Conditions as recorded",
+      "orderRule": "Order of entitlement",
+      "tiers": "Tiers named by the deed",
+      "lines": "Lines named by the deed",
+      "maintenanceReserve": "Maintenance reserve (siyana)",
+      "disbursementChannel": "Disbursement channel",
+      "nazirFee": "Nazir fee set by the deed",
+      "unspecified": "The deed is silent or the term is not legible",
+      "unspecifiedNote": "Silent is not the same as none. A deed that stipulates no maintenance reserve and a deed nobody could read are different facts and are kept apart.",
+      "noneStipulated": "The deed positively stipulates none",
+      "empty": "None named",
+      "completenessTitle": "Completeness",
+      "completenessIntro": "What is missing here decides whether a distribution can be computed at all.",
+      "complete": "Nothing halting is missing from these conditions.",
+      "missingTitle": "Missing — a distribution would halt",
+      "missingBody": "A distribution refuses to compute while any of these is unresolved. Nothing is estimated in their place.",
+      "advisoryTitle": "Advisory — a distribution would still run",
+      "advisoryBody": "Worth resolving, but none of these halts a computation.",
+      "wouldHaltTitle": "What a distribution would refuse with today",
+      "wouldHaltBody": "These are diagnostic codes, left in machine form on purpose: each names the exact refusal a computation would return, and the wording a beneficiary reads is the sentence above."
+    },
+    "reserved": {
+      "title": "Reserved matters",
+      "intro": "Acts that no seat may perform alone. Each is recorded, then blocked until the Nazir approves it.",
+      "empty": "No reserved matter has been raised on this endowment.",
+      "blockedBadge": "Blocked until approved",
+      "blockedBody": "Recorded as reserved. The act itself has not been performed and cannot be until this request is approved by the Nazir, who is the sole approval authority.",
+      "approvedBody": "Approved. The act may now be executed against this approval, and against no other subject.",
+      "subject": "Subject",
+      "maker": "Raised by",
+      "checker": "Approved by",
+      "decidedAt": "Decided on",
+      "chainTitle": "Approval chain",
+      "chainIntro": "The steps a reserved matter must carry before the Nazir may sign. Staff record each as received, against its reference; the signature is refused while a required step is missing.",
+      "principalConsent": "Principal's consent",
+      "counselReview": "Counsel review",
+      "authorityNotice": "Authority notice or approval",
+      "chainIncompleteTitle": "Steps not recorded",
+      "istibdalTitle": "Substitution (istibdal)",
+      "istibdalCorpusNote": "Substitution proceeds are corpus, not yield. Recording this act writes no receipt and can never feed a distribution.",
+      "istibdalWindow": "Authority notice window, in business days",
+      "status": {
+        "PENDING": "Pending",
+        "APPROVED": "Approved",
+        "REJECTED": "Rejected",
+        "EXECUTED": "Executed",
+        "VOID": "Void"
+      },
+      "kind": {
+        "ASSET_DISPOSAL": "Disposal of an endowed asset",
+        "ASSET_SUBSTITUTION_ISTIBDAL": "Substitution of an endowed asset (istibdal)",
+        "ASSET_PLEDGE": "Pledge of an endowed asset",
+        "ASSET_LONG_LEASE": "Long lease of an endowed asset",
+        "DEED_IDENTITY": "Deed or certificate identity",
+        "DEED_TERM_RECORD": "Recording a condition of the deed",
+        "ACCESS_MATRIX_CHANGE": "Change to the access matrix",
+        "RECEIPT_CLASS_CORRECTION": "Correction of a receipt's classification (income or corpus)",
+        "CLASSIFICATION_RETURN_TO_NOT_CLASSIFIED": "Revocation of a recorded classification — re-locks the register"
+      },
+      "chainState": {
+        "RECORDED": "Recorded",
+        "NOT_RECORDED": "Not recorded",
+        "NOT_REQUIRED": "Not required"
+      },
+      "chainEnforced": "Enforced: the database refuses the signature while a required step is unrecorded.",
+      "signBlockedTitle": "Signature disabled",
+      "signBlockedBody": "The Nazir cannot approve this matter until these steps are recorded:",
+      "signReady": "All required steps are recorded. The matter awaits the Nazir's signature.",
+      "recordTitle": "Record a received step",
+      "recordIntro": "Record the written approval, the review or the notice as received, against its own reference. A vault document may be attached when the instrument is filed.",
+      "reference": "Reference",
+      "referencePlaceholder": "Letter, memo or notice reference",
+      "documentId": "Vault document (optional)",
+      "documentIdPlaceholder": "Document identifier",
+      "record": "Record",
+      "recordedBy": "Recorded by",
+      "recordedAt": "Recorded on",
+      "stepSaved": "The step was recorded.",
+      "chainStep": {
+        "PRINCIPAL_CONSENT": "Principal's consent",
+        "COUNSEL_REVIEW": "Counsel review",
+        "AUTHORITY_NOTICE": "Authority notice or approval"
+      }
+    },
+    "beneficiaries": {
+      "title": "Beneficiaries",
+      "registryTitle": "Beneficiary registry",
+      "intro": "Every beneficiary recorded on this endowment, within your access scope. Who is entitled in a given period is the distribution engine's answer, computed fresh each run — never this screen's.",
+      "empty": "No beneficiary is recorded on this endowment.",
+      "columnMember": "Beneficiary",
+      "columnKind": "Kind",
+      "columnStatus": "Status",
+      "columnVerification": "Verification",
+      "columnKyc": "KYC freshness",
+      "columnResidency": "Residency",
+      "columnTier": "Tier",
+      "columnShares": "Shares",
+      "kindValue": {
+        "FAMILY": "Family member",
+        "CHARITABLE_JIHA": "Charitable jiha",
+        "CATEGORY_ONLY": "Category — members not yet identified"
+      },
+      "verificationValue": {
+        "VERIFIED": "Verified",
+        "PENDING": "Verification pending",
+        "UNVERIFIED": "Unverified"
+      },
+      "residencyValue": {
+        "DOMESTIC": "Domestic",
+        "CROSS_BORDER": "Cross-border"
+      },
+      "kycValue": {
+        "FRESH": "KYC current",
+        "STALE": "KYC stale — refresh window lapsed",
+        "UNVERIFIED": "KYC never verified"
+      },
+      "kycNote": "Freshness is computed on every read against the refresh window held in the settings register:",
+      "statusActive": "Active",
+      "statusDeceased": "Deceased — death certified",
+      "statusInactive": "Inactive — no death certified",
+      "deathCertified": "Death certified on",
+      "categoryCaptured": "Category captured",
+      "categoryNotCaptured": "Disbursement blocked until the category is captured",
+      "ubo": "Beneficial owner",
+      "sharePercent": "Share",
+      "stipulatedWeight": "Stipulated weight",
+      "sharesNote": "An absent share or weight is a recorded fact — the deed stipulates none. It is never rendered as zero: a zero weight is a different instruction entirely.",
+      "lineageTitle": "Family tree",
+      "lineageIntro": "Recorded descent only: each member sits under the parent the record names, with the tier derived from that edge. No entitlement is computed or shown here — an exclusion can be temporary and belongs to the engine's own answer.",
+      "lineageEmpty": "No family member is recorded on this endowment.",
+      "tier": "Tier",
+      "tierMismatch": "Recorded tier disagrees",
+      "nonLineageTitle": "Outside the lineage",
+      "nonLineageBody": "A charitable jiha is not a descendant of the waqif; it holds no place in the tree and no lineage record.",
+      "integrityTitle": "Lineage integrity",
+      "integrityIntro": "Recomputed by the kernel on every read and never stored. Each finding names the member's record identifier.",
+      "integrityOk": "No integrity gap found in this graph",
+      "missingLinkTitle": "Members the engine cannot place",
+      "missingLinkBody": "These records carry no lineage edge, so their descent is not on record. A distribution halts rather than pay someone it cannot place in the family tree.",
+      "tierMismatchTitle": "Recorded tier disagrees with the derived depth",
+      "tierMismatchBody": "The recorded tier is a cross-check, not a trusted input: the authoritative depth is derived from the parent edge. The engine refuses such a graph, and nothing here reconciles it.",
+      "rootedOutsideTitle": "Parent not visible on this endowment",
+      "rootedOutsideBody": "The parent this record names does not resolve within your access scope. That is a scoping fact about the reader, reported as such — not data corruption.",
+      "cyclesTitle": "Cycles in the graph",
+      "cyclesBody": "A cyclic graph is refused by the distribution engine; this view reports what the kernel found on this read."
+    },
+    "registrationAnchorKindValue": {
+      "WAQF_DOCUMENTATION_DATE": "Waqf documentation date",
+      "REGULATION_EFFECTIVE_DATE": "Regulation effective date"
+    },
+    "dischargeKindValue": {
+      "MET": "Met — registered with the Authority"
+    },
+    "anchor": {
+      "title": "Authority registration clock",
+      "intro": "The Authority registration window (30 business days, Art. 8(1)) is counted from a date the operator records here. Nothing derives or defaults it, and the kind travels with the date.",
+      "unverified": "Verify — may be stale (confirm against primary law): which date governs and the 30-day figure.",
+      "date": "Clock-start date",
+      "kind": "Which date this is",
+      "kindPlaceholder": "Choose which date…",
+      "save": "Record clock start",
+      "clear": "Clear the recorded date",
+      "recorded": "Recorded",
+      "notRecorded": "Not recorded — the registration deadline cannot be computed for this endowment.",
+      "editable": "Editable. Every change is kept in the audit trail with its prior value.",
+      "saved": "The clock start was recorded and its deadline computed.",
+      "savedNotComputable": "The clock start was recorded. Its deadline could not be computed: the date is outside the seeded Hijri calendar coverage.",
+      "cleared": "The recorded clock start was cleared."
+    },
+    "discharge": {
+      "title": "Registration duty — discharge",
+      "intro": "Once the registration with the Authority has been completed, record the date it was completed. The duty is then recorded as met. The clock-start above is not changed: editing a date corrects an input error; a discharge records a fact.",
+      "open": "The registration duty stands open — not yet recorded as discharged.",
+      "noDeadline": "No registration deadline is on file for this endowment, so a discharge cannot be recorded here.",
+      "dischargedOn": "Registered with the Authority on",
+      "due": "Deadline on file",
+      "date": "Date the registration was completed",
+      "save": "Record the duty as discharged",
+      "saved": "The registration duty was recorded as discharged (met).",
+      "refusedAlready": "This registration duty is already recorded as discharged. A recorded discharge is not edited; a wrong record is corrected on the record.",
+      "refusedNoDeadline": "No registration deadline is on file for this endowment, so there is nothing to discharge — record a computable clock-start first.",
+      "refusedPrecedes": "The completion date is before the recorded clock-start. A duty cannot be met before its clock starts — check the date, or the clock-start above.",
+      "refusedFuture": "The completion date is in the future. A discharge records something that has happened."
+    },
+    "expropriations": {
+      "title": "Expropriations and istibdal",
+      "intro": "The Authority-notice window for a substitution (10 business days, Art. 12(3)) is counted from the completion date recorded here. Nothing derives it.",
+      "empty": "No expropriation is recorded on this endowment.",
+      "announced": "Taking announced",
+      "status": "Istibdal status",
+      "completed": "Istibdal completed",
+      "notCompleted": "Not recorded — the Authority-notice deadline cannot be computed for this substitution.",
+      "save": "Record completion",
+      "clear": "Clear",
+      "saved": "The completion date was recorded and its deadline computed.",
+      "savedNotComputable": "The completion date was recorded. Its deadline could not be computed: the date is outside the seeded Hijri calendar coverage.",
+      "cleared": "The recorded completion date was cleared."
+    },
+    "onboarding": {
+      "title": "Onboarding gates",
+      "intro": "Three sequenced handover gates. Nothing downstream proceeds until the prior gate clears: a distribution run and an Authority filing are blocked until Gate 02 (Systems & Controls) is cleared.",
+      "gate": {
+        "GATE_01_AUTHORITY_LEGAL": "Gate 01 — Authority & Legal",
+        "GATE_02_SYSTEMS_CONTROLS": "Gate 02 — Systems & Controls",
+        "GATE_03_PEOPLE_PROPERTY_CADENCE": "Gate 03 — People, Property & Cadence"
+      },
+      "status": {
+        "OPEN": "Open",
+        "CLEARED": "Cleared"
+      },
+      "notRecorded": "No gate record exists for this endowment; it reads as open.",
+      "clearedBy": "Cleared by",
+      "clearedAt": "Cleared on",
+      "reopenedBy": "Reopened by",
+      "reopenedAt": "Reopened on",
+      "reopenReason": "Reason",
+      "blocksTitle": "While open, this gate blocks",
+      "activity": {
+        "DISTRIBUTION_RUN": "distribution runs",
+        "AUTHORITY_FILING_SUBMISSION": "Authority filing submissions"
+      },
+      "blockedNow": "Blocked now",
+      "nothingBlocked": "Nothing is blocked: Gate 02 is cleared.",
+      "prerequisitesTitle": "Not yet on record",
+      "prerequisite": {
+        "TRUSTEESHIP_DEED_NOT_RECORDED": "No trusteeship deed is recorded",
+        "NAZIR_ELIGIBILITY_NOT_VERIFIED": "The Nazir’s eligibility has not been verified on the deed",
+        "CLASSIFICATION_NOT_RECORDED": "No Authority classification is recorded",
+        "NO_DEDICATED_BANK_ACCOUNT": "No dedicated bank account is recorded",
+        "NO_BENEFICIARY_RECORDED": "No beneficiary is recorded"
+      },
+      "orderRefusal": {
+        "PRIOR_GATE_NOT_CLEARED": "The prior gate has not been cleared.",
+        "LATER_GATE_STILL_CLEARED": "A later gate is still cleared; reopen it first."
+      },
+      "checklistTitle": "The clearer attests",
+      "checklist": {
+        "classificationConfirmed": "Classification confirmed with the Authority",
+        "waqfAndAssetsRegistered": "The waqf and all assets registered",
+        "deedCertificateTitleDeedsInVault": "Deed, certificate and title deeds secured in the vault",
+        "counselReviewOfReservedMattersAndLicensing": "Counsel review of reserved matters and licensing",
+        "identityAndEmailStoodUp": "Identity and email stood up",
+        "cloudAccountingOnSocpaChart": "Cloud accounting on the SOCPA chart",
+        "dedicatedBankAccountsOpened": "Dedicated bank accounts opened",
+        "opsWorkspaceAndComplianceCalendar": "Operations workspace and compliance calendar",
+        "vaultAndDashboardStoodUp": "Vault and dashboard stood up",
+        "beneficiaryRegistryAndAccessMatrixBuilt": "Beneficiary registry and access matrix built",
+        "licensedSubcontractorsAppointedBoardApproved": "Licensed subcontractors appointed, Board-approved",
+        "annualTrainingComplete": "Annual training complete",
+        "reportingCadenceEstablished": "Reporting cadence established"
+      },
+      "clearTitle": "Clear this gate",
+      "clearIntro": "Attest each item as done. The gate is cleared over the facts on record; an attestation cannot stand in for a missing deed, classification, account or registry.",
+      "note": "Note (optional)",
+      "clear": "Clear the gate",
+      "reopenTitle": "Reopen this gate",
+      "reopenIntro": "Only the Nazir may reopen a cleared gate. Reopening blocks downstream activity again; the reason is recorded.",
+      "reason": "Reason",
+      "reopen": "Reopen the gate",
+      "cleared": "The gate was cleared.",
+      "reopened": "The gate was reopened.",
+      "intaken": "The endowment was registered. All three onboarding gates are open."
+    },
+    "intake": {
+      "title": "Register an endowment",
+      "intro": "Records a new endowment for a family QMULATE already acts for: its founder, deed identity, the founder’s conditions as stated, the trusteeship appointment, and its first Nazir. The three onboarding gates open with it.",
+      "noAuthority": "You may not register an endowment: registering one needs both the endowment-record and access-matrix verbs on one of the client’s existing endowments.",
+      "client": "Client (family)",
+      "waqif": "Founder (waqif)",
+      "waqifExisting": "An existing founder",
+      "waqifNew": "A new founder",
+      "waqifNameAr": "Founder name (Arabic)",
+      "waqifNameEn": "Founder name (English, optional)",
+      "certificateNumber": "Certificate number",
+      "deedNumber": "Deed number",
+      "type": "Waqf type",
+      "nature": "Nature",
+      "entitlementOrder": "Order of entitlement",
+      "shartNarrativeAr": "Founder’s conditions, as stated in the deed (Arabic)",
+      "shartNote": "Captured once and never edited. What the deed does not say is recorded as unspecified; the distribution engine halts until the deed terms are recorded.",
+      "fiscalYearEnd": "Fiscal year end (MM-DD)",
+      "registrationDate": "Certificate registration date",
+      "trusteeship": "Trusteeship appointment",
+      "primaryNazir": "Primary Nazir (as named in the deed)",
+      "primaryAppointedDate": "Appointment date",
+      "jointlyLiable": "Jointly and severally liable representative named",
+      "eligibility": "Eligibility criteria as stated (unverified — verify vs primary law)",
+      "islam": "Muslim",
+      "legalCapacity": "Legal capacity",
+      "noDisqualifyingRemoval": "No disqualifying removal",
+      "ksaResident": "KSA resident",
+      "nazirEmail": "First Nazir seat (staff e-mail)",
+      "nazirNote": "The seat is issued with the birth. You cannot seat yourself.",
+      "fixtureNote": "This environment holds fixture data only: identifiers must start with {prefix} and e-mails end with {domain}.",
+      "submit": "Register the endowment",
+      "registered": "The endowment was registered. All three onboarding gates are open.",
+      "typeValue": {
+        "PUBLIC_CHARITABLE": "Public charitable (khayri)",
+        "FAMILY_DHURRI": "Family (dhurri)"
+      },
+      "natureValue": {
+        "AYNI": "In kind (ayni)",
+        "QIYAMI": "Value (qiyami)"
+      },
+      "orderValue": {
+        "LINEAGE_CONTINUATION": "Lineage continuation (default)",
+        "ORDERED": "Ordered (al-a‘la fa-l-a‘la)",
+        "SHARED": "Shared (tashrik)",
+        "NA_DIRECT_USE": "Not applicable — direct use"
+      },
+      "registeredId": "New endowment id: {id}. Its seated Nazir sees it; you hold no seat on it."
+    }
+  },
+  "distribution": {
+    "title": "Distributions",
+    "intro": "Only ghallah (income) is distributed. The endowment’s corpus enters no figure on these screens and is never added to income in one total.",
+    "empty": "No distributions on this endowment yet",
+    "emptyBody": "A distribution begins by computing a fiscal period from the income receipts recorded in it.",
+    "newRun": "Compute a distribution",
+    "runTitle": "Distribution run",
+    "period": "Period",
+    "periodStart": "Period start",
+    "periodEnd": "Period end",
+    "engineVersion": "Calculation engine version",
+    "runDigest": "Run digest",
+    "runDigestBody": "A fingerprint computed over the run’s inputs and result — this is what the Nazir approves. A different engine version makes two runs incomparable.",
+    "wizard": {
+      "title": "Compute a distribution run",
+      "stepPeriod": "Period",
+      "stepPeriodBody": "The period’s receipts are read from the ledger with the classification recorded at entry; nothing is classified here.",
+      "stepWaterfall": "Waterfall",
+      "stepWaterfallBody": "The order is binding: maintenance first, then operating costs, then the Nazir fee, then the distributable.",
+      "stepLines": "Lines",
+      "stepLinesBody": "One line per recorded beneficiary, each with the reason it was withheld or excluded, if any.",
+      "stepReview": "Review",
+      "stepReviewBody": "The figures and notes are reviewed before submission. Computing alone pays nothing.",
+      "stepSubmit": "Submit for approval",
+      "stepSubmitBody": "The run is submitted to the Nazir for approval. Whoever prepared it may not approve it.",
+      "compute": "Compute",
+      "recompute": "Recompute",
+      "submit": "Submit for approval",
+      "previewOnly": "This is a preview and is not written to the record: no lines and no entries until the run is saved."
+    },
+    "waterfall": {
+      "title": "The distribution waterfall",
+      "intro": "The order is binding and nothing may be re-ordered: maintenance is reserved from income before any cost, then operating costs, then the Nazir fee; what remains is the distributable.",
+      "revenue": "Income revenue",
+      "maintenanceReserve": "Maintenance reserved",
+      "operating": "Operating costs",
+      "netIncome": "Net income",
+      "nazirFee": "Nazir fee",
+      "nazirFeeDeedNote": "The Nazir fee is set by the waqf deed — not by statute and not by a system setting.",
+      "distributable": "Distributable",
+      "corpusTitle": "Corpus receipts — held out of the distribution",
+      "corpusBody": "The corpus, and whatever stands in its place, is never distributed. Sale proceeds and istibdal proceeds are corpus, not income: they return to the corpus and enter none of the waterfall figures above. They are shown here as visibly excluded rather than absent.",
+      "corpusNoTotal": "This amount is never added to income revenue in a combined total.",
+      "corpusReceiptCount": "Corpus receipts",
+      "corpusAmount": "Corpus receipts total"
+    },
+    "totals": {
+      "title": "Totals",
+      "paid": "Paid",
+      "withheld": "Withheld",
+      "crossBorder": "Pending cross-border transfer",
+      "retained": "Retained in the endowment",
+      "entitled": "Total entitlement",
+      "residual": "Halalas left over from rounding",
+      "entitledLineCount": "Entitled lines",
+      "excludedCount": "Excluded"
+    },
+    "lines": {
+      "title": "Distribution lines",
+      "beneficiary": "Beneficiary",
+      "status": "Status",
+      "share": "Share",
+      "entitled": "Entitlement",
+      "reason": "Reason",
+      "basisTitle": "How this line was decided",
+      "rule": "Entitlement rule",
+      "tier": "Tier",
+      "gateTitle": "Procedural holds on payment",
+      "gateBody": "A procedural hold stops payment without reducing entitlement: the amount stands unchanged.",
+      "empty": "No lines in this run",
+      "noCopyTitle": "This code has no approved wording",
+      "noCopyBody": "This reason has no approved wording in this build, and wording it is legal text approved elsewhere. The machine code is shown so it can be reported rather than guessed at."
+    },
+    "refusal": {
+      "title": "The calculation stopped",
+      "discriminatorTitle": "The condition that stopped it",
+      "sourceEngine": "The engine halted on the founder’s conditions: this is a condition to be clarified, not a record to be completed.",
+      "sourceMapper": "Refused before the engine saw it: a recorded state the engine’s input cannot express — this is a record whose entry must be completed.",
+      "nothingComputed": "This run produced no figure and nothing was written from it."
+    },
+    "runStatus": {
+      "DRAFT": "Draft",
+      "COMPUTED": "Computed",
+      "PENDING_APPROVAL": "Pending approval",
+      "APPROVED": "Approved",
+      "EXECUTED": "Executed",
+      "CANCELLED": "Cancelled"
+    },
+    "lineStatus": {
+      "PAID": "Paid",
+      "WITHHELD": "Withheld",
+      "CROSS_BORDER_PENDING": "Pending cross-border transfer",
+      "EXCLUDED": "Excluded"
+    },
+    "distributionTypeValue": {
+      "MONETARY": "Monetary distribution",
+      "NA_DIRECT_USE": "Direct utilization — no monetary distribution"
+    },
+    "receiptClass": {
+      "INCOME": "Income",
+      "CAPITAL": "Corpus"
+    },
+    "capitalSource": {
+      "SALE_PROCEEDS": "Sale proceeds",
+      "ISTIBDAL_PROCEEDS": "Istibdal (substitution) proceeds",
+      "EXPROPRIATION_COMPENSATION": "Expropriation compensation",
+      "OTHER": "Other corpus source"
+    },
+    "feeBasis": {
+      "PERCENT_OF_REVENUE": "Percentage of revenue",
+      "PERCENT_OF_NET_INCOME": "Percentage of net income",
+      "RETAINER": "Fixed retainer"
+    },
+    "timingStatus": {
+      "ON_TIME": "Within the window",
+      "OVERDUE": "Overdue"
+    },
+    "deadlineBasis": {
+      "SHART_SCHEDULE": "Schedule stipulated by the deed",
+      "POST_FYE_DEFAULT": "Window following the fiscal year end"
+    },
+    "bindingCalendar": {
+      "EARLIER_OF": "Whichever of the two calendars falls first",
+      "GREGORIAN": "Gregorian",
+      "HIJRI": "Hijri"
+    },
+    "authorityNoticeType": {
+      "CROSS_BORDER_DISBURSEMENT": "Authority notice — disbursement outside the Kingdom"
+    },
+    "flag": {
+      "AUTHORITY_FEE_DETERMINATION_PENDING": "The deed records no Nazir-fee basis, so no fee was deducted and its determination is pending.",
+      "NO_ELIGIBLE_BENEFICIARIES": "No beneficiary is entitled in this period.",
+      "NIL_DISTRIBUTION": "The distributable is zero, so nothing was paid.",
+      "NA_DIRECT_USE": "A direct-utilization endowment: no monetary distribution is computed from it.",
+      "CAPITAL_RECEIPTS_EXCLUDED": "Corpus receipts were held out of the calculation: the corpus is never distributed, and they are shown as excluded, by id.",
+      "MAINTENANCE_RESERVE_POLICY_UNACKNOWLEDGED": "The deed is silent on maintenance and no Nazir discretion is recorded, so the reserve was zero — and that zero is not a decision anybody made.",
+      "TIMING_OVERDUE": "This distribution is past its deadline.",
+      "UNVERIFIED_FIGURES_APPLIED": "Figures drawn from regulation were applied in this calculation and have not yet been confirmed against primary law.",
+      "STIPULATED_WEIGHTS_NOT_APPLIED_PER_CAPITA": "Weights recorded in the register were not applied: this run’s rule is equal per head. The weights are traced as recorded and were not dropped.",
+      "CONTINUATION_STIPULATION_NOT_APPLIED": "The continuation stipulation is recorded, and this deed’s entitlement order does not consume it, so it was not applied.",
+      "REVERSION_TO_ULTIMATE_TAKER_APPLIED": "The deed’s ultimate-taker clause took effect: the distributable went to the party the deed names, at the weight the deed stipulates.",
+      "REVERSION_NOT_TRIGGERED_DESCENDANTS_LIVING": "The ultimate-taker clause did not take effect: a line the deed continues remains among the descendants, so the distributable stayed in the endowment.",
+      "REVERSION_NOT_TRIGGERED_BLOODLINE_UNENUMERATED": "The ultimate-taker clause did not take effect: the descendant register is not fully enumerated, and no line may be declared ended from an incomplete record."
+    },
+    "invariant": {
+      "I1": "Waterfall conservation: the deductions and the distributable add back to revenue.",
+      "I2": "The split conserves the distributable.",
+      "I3": "The line statuses partition the amount exactly.",
+      "I4": "No figure anywhere is negative.",
+      "I5": "Tier exclusion is applied over descendants where the deed stipulates it.",
+      "I6": "A procedural hold never moves a single halala of entitlement.",
+      "I7": "A direct-utilization endowment produces no monetary distribution.",
+      "I8": "Re-running the same input gives the same result. This cannot be proven from one run, so it is never listed as checked.",
+      "I9": "The halalas left over from rounding are fewer than the entitled lines.",
+      "I-C1": "Corpus never mixes with income: no corpus receipt entered the distribution.",
+      "I-L1": "Per capita: the spread between the highest and lowest entitlement is at most one halala.",
+      "I-R1": "No charity is paid a halala in the same run as any descendant."
+    },
+    "invariantsCheckedTitle": "Invariants this calculation asserted",
+    "invariantsNotAssertedTitle": "Invariants that make no claim about this run",
+    "invariantsNotAssertedBody": "An invariant that says nothing about this run is not listed as checked: listing it would let a reader rely on a guarantee that was never given.",
+    "traceStage": {
+      "INPUT": "Input",
+      "WATERFALL": "Waterfall",
+      "RESOLVER": "Entitlement",
+      "GATES": "Procedural holds",
+      "TIMING": "Timing",
+      "ALLOCATE": "Allocation",
+      "INVARIANTS": "Invariants"
+    },
+    "traceTitle": "Calculation trace",
+    "traceBody": "The trace is recorded inside the run’s digest. It is shown by code because its text is part of what is signed, not display copy.",
+    "diagnosticsTitle": "What reading the record noticed",
+    "diagnosticsBody": "Observations about the record itself, outside the run’s digest: they change no figure, and are reported rather than dropped.",
+    "diagnosticSeverity": {
+      "CONFLICT": "Conflict",
+      "NOTICE": "Notice"
+    },
+    "diagnostic": {
+      "MAINTENANCE_DEED_RULE_WINS_OVER_RECORDED_NAZIR_DISCRETION": "The deed stipulates a maintenance rule and a Nazir discretion is nonetheless recorded: the deed prevails and the recorded discretion was not applied.",
+      "MAINTENANCE_PERCENT_RATE_NOT_EXACTLY_REPRESENTABLE": "The recorded maintenance percentage is not a figure a human wrote but the residue of an earlier division upstream. The exact value is passed through: repairing it here would be this layer deciding the founder’s rate.",
+      "MAINTENANCE_POLICY_UNACKNOWLEDGED": "The deed is silent on maintenance and no discretion is recorded: the reserve is zero, and that zero is not a decision anybody made.",
+      "NAZIR_FEE_DEED_SILENT_CONFIGURED_FIGURE_NOT_SUBSTITUTED": "The deed records no Nazir-fee basis, and a configured figure was not substituted for it: the fee is set by the deed.",
+      "NAZIR_FEE_DEED_RATE_DISAGREES_WITH_CONFIGURED_FIGURE": "The deed’s Nazir-fee rate disagrees with the configured figure. The deed prevails.",
+      "OPERATING_COST_EXPENSE_CATEGORY_EXCLUDED": "An expense in the period was not counted as an operating cost; its category and total are reported with it.",
+      "LEDGER_REVERSED_PAIR_EXCLUDED": "A reversed entry and its reversal were excluded from the period’s ledger, by id: the pair nets out by exclusion, not by arithmetic.",
+      "CAPITAL_RECEIPTS_PASSED_TO_ENGINE": "Corpus receipts were passed to the engine, by id, so it holds them out visibly; filtering them out beforehand would make the corpus absent rather than excluded.",
+      "SHART_ADVISORY_GAP": "An advisory gap in the founder’s conditions — non-halting by the conditions’ own declaration.",
+      "DISBURSING_ENTITY_HAS_NO_COLUMN": "No column records the disbursing entity, so its licence cannot be checked from stored data at all.",
+      "BANKING_REF_FOR_PROCEEDS_HAS_NO_COLUMN": "No column records the banking reference for proceeds, so a paid line carries no payment target."
+    },
+    "approval": {
+      "title": "Maker and checker",
+      "body": "Whoever prepares a run may not approve it. The Nazir is the checker on money movement and is never its maker.",
+      "maker": "Prepared by",
+      "checker": "Approved by",
+      "submittedAt": "Submitted",
+      "awaitingChecker": "Awaiting the Nazir’s approval",
+      "approve": "Approve",
+      "reject": "Reject",
+      "execute": "Execute the run",
+      "executeBody": "Payment lines are written only against an approval that names this very run, with a maker who is not the checker.",
+      "notAuthorisedTitle": "This run may not be executed",
+      "notAuthorisedBody": "The approval condition for this run is not satisfied, so nothing was written and everything this attempt began was rolled back.",
+      "queueTitle": "Pending approvals",
+      "queueEmpty": "Nothing is pending approval",
+      "queueEmptyBody": "Everything submitted for approval has been decided.",
+      "queuePeriod": "Period",
+      "queueDistributable": "Distributable"
+    },
+    "dashboard": {
+      "pendingTitle": "Runs awaiting approval",
+      "pendingBody": "Runs computed and submitted but not yet decided. Nothing is paid from them before approval and execution.",
+      "overdueTitle": "Distributions past their deadline",
+      "overdueBody": "The window computed here rests on figures drawn from regulation that have not yet been confirmed against primary law."
+    },
+    "exclusionReason": {
+      "UPPER_TABAQA_EXTANT": "Entitlement goes layer by layer, starting with the higher layer. Since one person in the higher layer is still alive, it is not yet the next layer’s turn to receive the entitlement. This does not mean there is anything wrong with the person or that they are not eligible. It is simply because of the order of entitlement set out in the deed.",
+      "TABAQA_EXTINCT": "A group of relatives where everyone in that group has died, so there is no one left alive from that group. This group comes below the people who have the right to inherit. The inheritance documents can show where this group comes in the inheritance order, using respectful and formal words about the people who have died.",
+      "ZERO_STIPULATED_WEIGHT": "The Waqf deed (the founder’s condition) states that this beneficiary’s share is not entitled to any distribution. The effect of this depends on the type of Waqf deed. In deeds where entitlement is arranged in order, a zero share may mean that the beneficiary is not entitled to receive anything. However, in family-based Waqf deeds, each family member’s entitlement is calculated separately.",
+      "BUTUN_LINE_NOT_CONTINUED": "Entitlement under the Waqf deed continues through the male descendants only, if this is stated in the founder’s condition in the Waqf deed. Based on this condition, if there is a daughter in the family line between the beneficiary and the founder, the entitlement does not continue through that branch. The beneficiary’s own gender does not matter; a son’s daughter can still be included, while a daughter’s children are not included.",
+      "ENTITLEMENT_HELD_BY_LIVING_ANCESTOR": "The beneficiary has an entitlement in this family line, but the share currently belongs to a living ancestor. The beneficiary will not receive the share at this time, but their place in the entitlement remains محفوظًا and may pass to them later according to the founder’s condition."
+    },
+    "entitlementRule": {
+      "LINEAGE_PER_CAPITA_ZUHUR_ONLY": "Entitlement is based on lineage and continues through the founder’s sons’ lines under the deed’s Zuhur condition. Within each continuing line, entitlement belongs to the nearest living head. A person with a living ancestor between them and the founder is not entitled. The share is divided equally among the entitled people for this period.",
+      "LINEAGE_PER_CAPITA_ZUHUR_AND_BUTUN": "Entitlement is based on lineage, and both sons’ and daughters’ lines continue. Within each line, entitlement belongs to the nearest living head. A descendant whose parent is still alive is not entitled. The share is divided equally among the entitled people for this period.",
+      "ORDERED_LOWEST_LIVING_TABAQA": "The beneficiary is entitled as a member of the highest generation that still has living entitled members, according to the order set out in the deed. Within that generation, each share follows the weight recorded in the deed and is not automatically equal.",
+      "SHARED_ALL_LIVING_TABAQAT": "The beneficiary is entitled under the deed’s sharing rule (Tashrik), where all living generations share together. Each beneficiary’s share follows the weight recorded in the deed, so the shares are not necessarily equal.",
+      "JOINT_FIXED_DEED_SHARES": "The beneficiary’s share is recorded as a fixed share in a joint deed record."
+    },
+    "withheldReason": {
+      "STALE_KYC": "The beneficiary needs to update their identity verification details because the current information is out of date. The beneficiary’s share will be held temporarily until the update is completed. Once the details are updated, the share can be paid according to the applicable procedures.",
+      "KYC_UNVERIFIED": "The beneficiary’s identity verification has not been completed yet, so their share is being held temporarily until the verification is completed. Once the verification is completed, the share can be paid according to the applicable procedures.",
+      "CROSS_BORDER_PENDING": "The beneficiary is outside the Kingdom, and their payment is being processed through the approved cross-border payment channel. The payment is still being processed and has not been refused or blocked. The beneficiary’s entitlement is not affected by being outside the Kingdom."
+    }
+  },
+  "dashboard": {
+    "board": {
+      "title": "Compliance board",
+      "intro": "Five zero-tolerance indicators for one endowment, read from the record as it stands today. A red indicator is a breach; a yellow one is a duty that cannot be assured today; a refused read says so and claims nothing.",
+      "asOf": "As of",
+      "refusedRead": "This read was refused for your seat. Nothing in this panel is a claim about the endowment.",
+      "noForms": "Nothing is recorded from this board. Every act is taken on the endowment record."
+    },
+    "selector": {
+      "title": "Endowments in your scope",
+      "body": "One endowment is shown at a time. The scope is your seat's own grants.",
+      "current": "Showing",
+      "none": "No endowment is readable from this seat."
+    },
+    "rollup": {
+      "title": "All endowments in scope",
+      "body": "Each line carries the worst of its five indicators. An endowment with one red indicator is red however the other four read.",
+      "overdue": "{count} overdue"
+    },
+    "kpi": {
+      "registration": {
+        "title": "Authority deadlines",
+        "body": "Registration, certificate update and istibdal notice — the statutory business-day windows."
+      },
+      "commingling": {
+        "title": "No commingling",
+        "body": "Every receipt on a dedicated endowment account, none on a shared one."
+      },
+      "kyc": {
+        "title": "Beneficiary KYC",
+        "body": "Every beneficiary verified within the refresh window."
+      },
+      "aml": {
+        "title": "AML reports",
+        "body": "Reports due to the regulator, filed on time."
+      },
+      "licence": {
+        "title": "Licensed activity",
+        "body": "No regulated activity carried on without its licence."
+      }
+    },
+    "tone": {
+      "danger": "Breach — zero tolerance",
+      "warning": "Cannot be assured today",
+      "success": "Met, on the record",
+      "refused": "Read refused for this seat"
+    },
+    "rule": {
+      "REGISTER_30BD": "Authority registration (30 business days)",
+      "UPDATE_15BD": "Certificate update (15 business days)",
+      "ISTIBDAL_10BD": "Istibdal notice (10 business days)",
+      "DISTRIBUTE_3M_FYE": "Distribution after fiscal year end (3 months)",
+      "KYC_REFRESH": "Beneficiary KYC refresh",
+      "LICENSE_RENEWAL": "Licence renewal",
+      "CONTRACT_RENEWAL": "Contract renewal",
+      "HEARING": "Court hearing",
+      "RETENTION_10Y": "Record retention (10 years)"
+    },
+    "state": {
+      "pending": "Pending",
+      "due_soon": "Due soon",
+      "at_risk": "At risk",
+      "overdue": "Overdue",
+      "met": "Met",
+      "waived": "Waived",
+      "cannot_compute": "Cannot be computed today"
+    },
+    "cause": {
+      "NOT_RECORDED": "The clock-start is not on the record, so no deadline exists yet. Record it on the endowment record.",
+      "RECORDED_NOT_COMPUTABLE": "The clock-start is recorded, but the business-day calendar does not cover it, so the deadline cannot be computed.",
+      "ROUTED_NO_HOME": "This duty is routed to a register that does not exist in this release. Nothing is claimed for it.",
+      "NOT_COMPUTED": "The inputs are on the record, but no deadline has been computed for them yet.",
+      "NOT_IN_SCOPE_YET": "Nothing is due yet — the certificate is valid beyond the notice window.",
+      "NO_SUBJECT": "Nothing to attach to — no substitution is pending."
+    },
+    "deadlines": {
+      "title": "Statutory deadlines",
+      "body": "One line per rule. A rule with no row says why, in its own words — an empty cell would hide six different kinds of absence.",
+      "due": "Due",
+      "remaining": "{count} business days remaining",
+      "late": "{count} business days late",
+      "discharged": "Discharged",
+      "cannotCompute": "Cannot be computed today:",
+      "calendar": "Calendar coverage",
+      "calendarUnavailable": "The business-day calendar could not be assembled:",
+      "zeroTolerance": "Zero tolerance"
+    },
+    "kyc": {
+      "title": "Beneficiary KYC freshness",
+      "body": "Computed on every read against the refresh window held in settings. Not stored.",
+      "empty": "No beneficiaries are on the register — there is nobody to verify, which is not the same as everyone verified.",
+      "lastRefreshed": "Last refreshed",
+      "count": "{count} beneficiaries"
+    },
+    "aml": {
+      "title": "AML reporting",
+      "body": "The regulator's reports and whether any was missed.",
+      "notModelled": "Report timeliness is not modelled in this release. The indicator cannot be assessed and no assurance is claimed."
+    },
+    "filings": {
+      "title": "Government filings",
+      "body": "Manual status fields recorded by the Nazir. This is not a live integration with any government platform.",
+      "empty": "No filing status has been recorded for this endowment.",
+      "lastUpdated": "Last updated",
+      "platform": {
+        "AWQAF_DIGITAL": "Awqaf Digital",
+        "BALADI": "Baladi",
+        "EJAR": "Ejar",
+        "ISTIHKAM": "Istihkam",
+        "MUQEEM": "Muqeem",
+        "QIWA": "Qiwa"
+      },
+      "status": {
+        "NOT_STARTED": "Not started",
+        "IN_PROGRESS": "In progress",
+        "SUBMITTED": "Submitted",
+        "ACCEPTED": "Accepted",
+        "REJECTED": "Rejected",
+        "N_A": "Not applicable"
+      }
+    },
+    "decisions": {
+      "title": "Decisions required",
+      "body": "Overdue duties and missing clock-starts, pinned here. Each is acted on from the endowment record.",
+      "empty": "Nothing on this board is pinned for a decision.",
+      "overdue": "Overdue",
+      "recordClockStart": "Record the clock-start",
+      "openRecord": "Open the endowment record"
+    }
+  },
+  "financials": {
+    "title": "Financial position",
+    "subtitle": "Cash, receipts, expenses and distributions for one endowment — read only.",
+    "selector": {
+      "title": "Endowment",
+      "body": "One endowment at a time: every figure below is scoped to the one selected.",
+      "none": "No endowment is in this seat's scope."
+    },
+    "cash": {
+      "title": "Cash position",
+      "total": "Cash held",
+      "ofWhichCorpus": "of which corpus (asl) — never distributable",
+      "accounts": "Dedicated accounts",
+      "accountNet": "Net on this account",
+      "accountCorpus": "of which corpus",
+      "dedicated": "Dedicated",
+      "notDedicated": "NOT dedicated — commingling exception",
+      "blendedNote": "A net balance mixes income and corpus by construction; the corpus figure beside it says how much may never be distributed."
+    },
+    "receipts": {
+      "title": "Receipts",
+      "income": "Income (ghallah) — the only class that may enter the waterfall",
+      "capital": "Capital (corpus) — blocked from every distribution",
+      "bySource": "Capital by source",
+      "wall": "Income and capital are separate classes and are never summed into a distributable figure."
+    },
+    "expenses": {
+      "title": "Expenses",
+      "total": "Total expenses",
+      "byCategory": "By category"
+    },
+    "distributions": {
+      "title": "Distributions",
+      "count": "{count} recorded",
+      "executed": "Executed distributable",
+      "byStatus": "By status"
+    },
+    "arrears": {
+      "title": "Arrears",
+      "notModelled": "Not tracked yet — this is not a zero. Nothing in the record states what is owed and unpaid, so no arrears figure can be shown."
+    },
+    "empty": {
+      "noTransactions": "No transactions yet — the dedicated waqf account must be linked first.",
+      "directUse": "This endowment is in direct utilization: the beneficiaries use the asset itself and no yield is distributed. There is no monetary distribution to report — this is not a zero.",
+      "directUseUnrecorded": "Whether this endowment is in direct utilization is NOT RECORDED, so this screen cannot say whether an empty financial position is expected. The question is left open rather than answered.",
+      "reasonNotHere": "Why the record is empty beyond the direct-utilization question is not readable on this screen; the endowment record carries it."
+    },
+    "owed": {
+      "title": "Not built yet — declared, not omitted",
+      "body": "These regions are part of this screen's specification and are NOT on it. They are named here because a financial screen that simply omitted them would read as though there were nothing to show.",
+      "transactions": "The transaction ledger table. It needs a transaction-list read that does not exist yet, which is also why no figure here drills through to its rows.",
+      "reconciliation": "The bank-reconciliation panel and its unmatched-items queue.",
+      "statements": "The class-appropriate statement export (SOCPA-audited for large and medium; simplified annual for small)."
+    },
+    "excluded": {
+      "label": "Rows excluded from every sum above",
+      "body": "{count} reversed or corrected rows are excluded. Their ids and reasons are not on this screen."
+    },
+    "unverified": "Figures shown here are records, not an audit opinion. This platform never emits an audited statement."
+  }
+}

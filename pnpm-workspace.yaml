@@ -1,0 +1,25 @@
+# QMULATE monorepo — pnpm workspace definition.
+#
+# pnpm 10 blocks dependency postinstall scripts by default. Without the
+# `onlyBuiltDependencies` allow-list below, `prisma generate` silently never runs
+# and `typecheck` fails later with confusing module-resolution errors.
+# (Mirrored in the root package.json `pnpm` field for tooling that still reads it.)
+
+packages:
+  - "apps/*"
+  - "packages/*"
+
+onlyBuiltDependencies:
+  - "@prisma/client"
+  - "@prisma/engines"
+  - prisma
+  - esbuild
+  - sharp
+  # embedded-postgres unpacks a real PostgreSQL binary in its install script.
+  # Local-dev only — CI uses a `postgres` service container instead — but the
+  # platform-specific optional deps still install on every host, so each is
+  # allow-listed rather than left to fail confusingly on a different machine.
+  - "@embedded-postgres/darwin-arm64"
+  - "@embedded-postgres/darwin-x64"
+  - "@embedded-postgres/linux-x64"
+  - "@embedded-postgres/linux-arm64"

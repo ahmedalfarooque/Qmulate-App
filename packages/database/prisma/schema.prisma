@@ -1,0 +1,2981 @@
+// QMULATE — Phase 1 data model (E1 / Sprint 1)
+//
+// Contract sources: docs/product/prd/07-data-model-spec.md (§1–§13),
+// docs/product/prd/12-security-audit-retention-spec.md (audit spine, encryption, retention),
+// docs/product/prd/17-build-ship-dod.md (E0/E1 exits, G-1, G-8), and the Sprint-1 E1 build contract.
+//
+// FOUR CONVENTIONS GOVERN THIS WHOLE FILE (§07 preamble):
+//   1. Money is NEVER a float. Every amount is `Decimal @db.Decimal(18,2)`, currency SAR.
+//      JS `number` is banned for money end-to-end (decimal.js in TS).
+//   2. Every legally-significant date is DUAL: canonical `xAt/xDate DateTime` (UTC — the
+//      arithmetic + sort source of truth) PLUS a frozen `...Hijri String` Umm-al-Qura snapshot
+//      ("yyyy-MM-dd", Latin digits, zero-padded) written at insert time, so historical display
+//      never shifts when a calendar library updates.
+//   3. Official financial/legal free text is ARABIC-AUTHORITATIVE: the `...Ar` field is REQUIRED
+//      and is the system of record; `...En` is an optional convenience translation.
+//   4. Scoping and audit are cross-cutting. Every material model is reachable from a `waqfId`
+//      (directly, or one hop via its parent) for the per-endowment access matrix, and every
+//      mutation flows through the append-only audit extension in `packages/database`.
+//
+// NAMING: table names are snake_case singular via `@@map`; COLUMN names stay Prisma camelCase.
+// Therefore ALL raw SQL against this schema must double-quote column identifiers.
+//
+// AUDIT4: `createdAt` / `updatedAt` / `createdBy` / `deletedAt` on every material model.
+// Deletion is SOFT ONLY during the retention window (§12) — `deletedAt`, never a hard DELETE.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 1. ENUMS — the domain's controlled vocabulary (§07 §1 + E1 contract §A)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Gates which compliance obligations apply.
+/// Band thresholds (SMALL < SAR 50M · MEDIUM 50M–<200M · LARGE >= 200M) live in `Setting`,
+/// never in code.
+/// ⚠ unverified — confirm vs primary law
+/// The Authority's SIZE classification — THREE values, plus the onboarding state.
+///
+/// ⊕ **S9-4a: `DIRECT_UTILIZATION` IS GONE FROM THIS ENUM (owner ruling, fifth batch, 2026-08-25,
+/// verbatim selection "a").** The owner stated the taxonomy in his own words first — *"there are 3
+/// types: large, medium, small"* — and then ruled that ذات انتفاع مباشر is an **ORTHOGONAL USAGE
+/// ATTRIBUTE, not a size**: an endowment could be small AND direct-use. Carrying it here conflated
+/// two axes, so a direct-use endowment had no size at all and a small one could not be direct-use.
+///
+/// ⚠ **REFUSED, NEVER REMAPPED (ADR-0004).** Migration 42 does not reassign existing rows to a
+/// plausible size — it REFUSES to run over any row holding the value, on `waqf` and on
+/// `reclassification_event`'s `from`/`to` alike. Choosing a size for a real endowment is a
+/// regulatory determination, not a data migration, and a silent remap would put a classification
+/// nobody made into the record that gates its statutory duties.
+///
+/// ⚠ Size thresholds stay ⚠ unverified vs primary law (the SAR 200M/50M bands live in `Setting`),
+/// and counsel is still owed the question the ruling itself flags: the regulation summary reads the
+/// instrument as FOUR categories while the owner (a practising Nazir) reads direct-benefit as an
+/// attribute. This enum records the PRODUCT's position.
+enum WaqfClassification {
+  LARGE
+  MEDIUM
+  SMALL
+  /// ⊕ S8-Q4 (owner, 2026-08-23): the ONBOARDING state, stated rather than NULL. The absence of a
+  /// determination, not a class — it never gates an obligation TRUE and the register is LOCKED
+  /// (no tasks instantiate) until the real classification is recorded. One-way: an endowment may
+  /// be BORN in it; `waqf_no_unclassify` + the reclassification `to`-check (migration 34) refuse
+  /// the return trip.
+  NOT_CLASSIFIED
+}
+
+/// khayrī (public-charitable) · ahlī-dhurrī (family) · mushtarak (joint)
+enum WaqfType {
+  PUBLIC_CHARITABLE
+  FAMILY_DHURRI
+  JOINT
+}
+
+/// ʿaynī (in-kind) vs qiyamī (value / cash)
+enum WaqfNature {
+  AYNI
+  QIYAMI
+}
+
+/// How the deed orders entitlement.
+///
+/// `LINEAGE_CONTINUATION` — **the NORMAL deed shape** (ADR-0009 R4): entitlement follows descent,
+/// per capita over the LIVING FRONTIER of each line (R-FRONTIER, 2026-08-03). `ORDERED`
+/// (al-aʿlā fa-l-aʿlā) is the **opt-in exception**, `SHARED` (tashrīk) a third order, and
+/// `NA_DIRECT_USE` direct use of the asset itself.
+///
+/// ⚠ `LINEAGE_CONTINUATION` LANDED IN MIGRATION 12 (S4/E3) and closed the ONE declared delta
+/// `packages/domain`'s `prisma-vocabulary-parity.test.ts` carried: the engine's `ENTITLEMENT_ORDERS`
+/// held it while this enum did not, so a deed the product treats as normal could not be recorded at
+/// all. Adding a member is additive — every existing row keeps its value.
+///
+/// ⚠ SURFACED, NOT DECIDED (S4): this column is a FOUNDER'S CONDITION carried in a freely-editable
+/// column. It is not in `SHART_COLUMNS`, not in the reserved-matter tier and not in the write-once
+/// tier migration 12 adds beside it, so a caller holding `endowment:waqf:write` can change
+/// al-aʿlā fa-l-aʿlā to tashrīk with an ordinary update. `Waqf.type` and `Waqf.nature` have the
+/// same shape. Bringing all three into the write-once/reserved tier is the recommendation; it
+/// changes what a LIVE endowment permits, so it is the product owner's call and S4 did not take it
+/// silently either way.
+enum EntitlementOrder {
+  LINEAGE_CONTINUATION
+  ORDERED
+  SHARED
+  NA_DIRECT_USE
+}
+
+/// Generational lines: ẓuhūr / buṭūn / not-applicable
+enum BeneficiaryLine {
+  ZUHUR
+  BUTUN
+  NA
+}
+
+/// Which of the waqif's lines the DEED continues — *ẓuhūr wa buṭūn* / ظهور وبطون (ADR-0009 R2).
+///
+/// A **CLOSED TWO-VALUE** deed term. There is no third member and **NO `@default`** on the column
+/// that uses it: absent, ambiguous or unrecognised ⇒ the engine halts `SHART_INCOMPLETE` /
+/// `CONTINUATION_STIPULATION_UNRECOGNISED`. Which lines a founder continued is a fiqh reading of
+/// the deed, and "unknown" is the ABSENCE of a value, never a value.
+///
+/// Spelled member-for-member as `packages/domain`'s `CONTINUATION_STIPULATIONS`, which
+/// `prisma-vocabulary-parity.test.ts` compares.
+enum ContinuationStipulation {
+  ZUHUR_ONLY
+  ZUHUR_AND_BUTUN
+}
+
+/// The fiqh link a descendant holds to their parent — the ẓuhūr/buṭūn **ELIGIBILITY FACT**.
+///
+/// ⚠ **NOT a demographic field and NOT a person's gender.** It exists for exactly ONE computation
+/// (the `ZUHUR_ONLY` intermediate-ancestor test in the distribution engine), is read for that and
+/// nothing else, and must NEVER be rendered as a person's gender: no UI label, no report column, no
+/// CSV export, no i18n key. `null` on `Beneficiary.lineageLink` means "not a descendant of the
+/// waqif" (a charitable jiha, including a recorded ultimate taker), never "unknown".
+///
+/// Kept as the RECORDED fact (`SON`/`DAUGHTER`) rather than pre-interpreted, because under
+/// `ZUHUR_AND_BUTUN` the interpreted form carries no information at all — pre-interpreting would
+/// bake one deed's reading into every deed's data.
+enum LineageLink {
+  SON
+  DAUGHTER
+}
+
+/// **مآل الوقف** — where the endowment goes once its beneficiary class ends (R7, product owner
+/// 2026-08-10; ADR-0009 amendment E).
+///
+/// ONE member today, and the discriminator exists *because* it is one: a deed may revert to another
+/// waqf, to the Authority, or to the waqif's nearest relatives, and the engine implements only the
+/// reading the owner gave. Any other recorded مآل must halt BY NAME
+/// (`REVERSION_KIND_UNRECOGNISED`) rather than be coerced into this one (Binding rule 1).
+enum ReversionKind {
+  CHARITABLE_ULTIMATE_TAKER
+}
+
+/// ⊕ S11-1 — WHICH date `Waqf.registrationAnchorDate` IS (owner ruling 2026-08-31, memo S10 addendum
+/// second batch, commit 9f3d8fd: *"yes sure, make a drop down if that helps"*).
+///
+/// §09's `REGISTER_30BD` clock starts on "the waqf documentation / regulation-effective date" — TWO
+/// different facts, and a bare date preserves WHEN while discarding WHAT IT IS. ⊕ THE TWO VALUES ARE
+/// THE REGULATION'S OWN DISJUNCTION, not a modelling choice: GOV-REG-01's titleAr in the compliance
+/// catalogue reads *"…خلال مدة لا تتجاوز ثلاثين يوم عمل من تاريخ توثيقه لدى الجهة المختصة **أو** تاريخ
+/// نفاذ اللائحة…"* — within thirty business days of the date of its documentation with the competent
+/// authority OR the date the regulation takes effect. The enum names those two branches and no third.
+/// (The thirty-day figure in that sentence stays unverified per binding rule 3; the disjunction is
+/// what this validates, not the number.) The owner's stated
+/// intent is to refine the governance of these dates later; a later refinement that cannot tell
+/// which endowments were recorded on which basis would have to re-interview every one of them. So
+/// the KIND travels with the date, as a CLOSED two-value term. NO DEFAULT anywhere: the pair is
+/// recorded together or not at all (CHECK `waqf_registration_anchor_kind_pairs_with_date`).
+///
+/// ⚠ Which of the two GOVERNS a given endowment, and the 30-business-day window itself, are
+/// UNVERIFIED against primary law (binding rule 3). This enum names the operator's declaration; it
+/// does not rule on it.
+enum RegistrationAnchorKind {
+  WAQF_DOCUMENTATION_DATE
+  REGULATION_EFFECTIVE_DATE
+}
+
+/// ⊕ S11-2 (migration 49) — HOW a statutory deadline was DISCHARGED. Owner ruling 2026-09-02 (S4 memo,
+/// S11 addendum second batch, f797fea): a red registration deadline clears because the duty was MET,
+/// recorded as a discharge — never by editing the clock-start. ONE member today. The vocabulary is
+/// CLOSED and PINNED (`deadline-discharge-kind-vocabulary.test.ts`): a new member — the counsel
+/// question could one day make NOT APPLICABLE the honest state of an endowment the duty never
+/// attached to — arrives only with a deliberate pin edit, its own migration relaxing
+/// `deadline_discharge_kind_pairs_with_met`, and its ar/en copy declared owed. `MET` pairs with
+/// `Deadline.satisfiedAt` (CHECK both directions) and is write-once.
+enum DeadlineDischargeKind {
+  MET
+}
+
+/// WHAT a `RESERVED_MATTER` `ApprovalRequest` approves (BR-306 + the reserved matters CLAUDE.md
+/// names). Before this enum an `ApprovalRequest` of type `RESERVED_MATTER` did not say what act it
+/// authorised at all, which is half of why the reserved-matter door was over-permissive.
+///
+/// ⚠ The column that uses it is NULLABLE and NOT yet mandatory on a `RESERVED_MATTER` row — see
+/// `ApprovalRequest.reservedMatterKind` for the measured reason and the one-line CHECK that closes
+/// it once every minting path sets the field.
+/// ⊕ S12-3 · BR-1101 — the operating model's three sequenced handover gates, in order. "Nothing
+/// downstream proceeds until the prior gate clears" (docs/company/operating-model.md). The ORDER is
+/// enforced by `onboarding_gate_order` (migration 52): Gate N may only be CLEARED while Gate N-1 is
+/// CLEARED. What each gate MEANS is the operating model's list, carried as `evidence` on the row.
+enum OnboardingGateKind {
+  GATE_01_AUTHORITY_LEGAL
+  GATE_02_SYSTEMS_CONTROLS
+  GATE_03_PEOPLE_PROPERTY_CADENCE
+}
+
+/// `OPEN` is the state of every gate at intake. `CLEARED` is a recorded human act (who, when, on what
+/// evidence). A cleared gate may be REOPENED by a Nazir with a reason (owner ruling 2026-09-08, "nazir
+/// can reopen") — reopening only ever blocks MORE, so it is the safe direction and needs no approval.
+enum OnboardingGateStatus {
+  OPEN
+  CLEARED
+}
+
+enum ReservedMatterKind {
+  ASSET_DISPOSAL
+  ASSET_SUBSTITUTION_ISTIBDAL
+  ASSET_PLEDGE
+  ASSET_LONG_LEASE
+  DEED_IDENTITY
+  DEED_TERM_RECORD
+  ACCESS_MATRIX_CHANGE
+  /// ⊕ Owner ruling Q-E5-1(b), 2026-08-18: a mis-classified receipt may be corrected, in BOTH
+  /// directions, and EVERY such correction requires an approved reserved matter. It has its own
+  /// kind because `executeReservedAct` COMPARES the kind — borrowing one of the seven above would
+  /// be a mislabelled authority, which is worse than an unlabelled one.
+  RECEIPT_CLASS_CORRECTION
+  /// ⊕ Owner ruling, 2026-08-25 (S8 addendum, FOURTH batch — *"Allow return, reserved-matter-gated"*,
+  /// recorded as ⚠ **overruling the orchestrator's recommendation**): an erroneous real
+  /// classification MAY return to `NOT_CLASSIFIED` *"via a maker≠checker reserved-matter approval
+  /// (e.g. a classification entered on the wrong endowment entirely). The one-way door gains exactly
+  /// this gated exception; **the default refusal stands for the ungated path.**"*
+  ///
+  /// ⚠ ITS OWN KIND, AND THE NAME IS DELIBERATELY LONG. `RECEIPT_CLASS_CORRECTION`'s note above
+  /// gives the rule — the kind is COMPARED, so a borrowed one is a mislabelled authority — and the
+  /// tempting short name here (`CLASSIFICATION_CORRECTION`) is exactly that mislabel: an ORDINARY
+  /// re-classification (MEDIUM → LARGE) is **not** reserved-matter-gated and never was. Only the
+  /// return to the absence of a determination is. The name says which act it authorises so that an
+  /// approval minted for one can never be spent on the other.
+  ///
+  /// ⚠ NOT a licence to edit history: the return is recorded as a further `reclassification_event`
+  /// (append-only, `_no_delete` since migration 6, `_no_update` since migration 12), so the
+  /// revocation is itself a recorded act rather than an erasure — which is the argument for why
+  /// the door is safe, and it is stronger than "the owner ruled it".
+  CLASSIFICATION_RETURN_TO_NOT_CLASSIFIED
+}
+
+/// The CLOSED state vocabulary of a corpus asset (product owner, 2026-08-16 — decisions log D-A:
+/// *"I'm thinking the list will be: Active, Fully Occupied/Rented, partially rented, vacant,
+/// expropriated/substituted."*).
+///
+/// ⚠ IT REPLACES A FREE-TEXT COLUMN THAT HAD ZERO CHECK CONSTRAINTS, and that is the whole point.
+/// MEASURED before migration 13, as the least-privileged runtime role on a pristine seed:
+/// `UPDATE "asset" SET "status" = 'مستبدل'` (the Arabic for *substituted*) COMMITTED with no
+/// reserved-matter approval, while the Latin `'substituted'` on the same row was refused 42501 —
+/// because `qmulate_asset_identity_guard()` gated an allow-list of twelve Latin SPELLINGS over a
+/// `String` column, and **Arabic is this product's authoritative language (NFR-01)**. A longer list
+/// has the identical defect, so the vocabulary is closed instead (V-E3-02).
+///
+/// ⚠ WHAT BECAME UNREPRESENTABLE, DELIBERATELY: `sold`, `pledged`, `mortgaged` and `long_leased`.
+/// That is STRICTER than before and coherent with waqf perpetuity — corpus leaves an endowment by
+/// istibdal or expropriation, not by sale.
+///
+/// ✓ CONFIRMED BY THE PRODUCT OWNER, 2026-08-17 (S4 owner-decision memo Q9), verbatim:
+/// *"remove 'sold'. since an endowment asset cannot be sold, if expropriated by government - they
+/// will replace with similar valued asset."*
+///
+/// `sold` WAS ALREADY UNREPRESENTABLE, SO NOTHING WAS REMOVED — and that was VERIFIED here rather
+/// than read. MEASURED on the live catalogue (cluster `q8q10db`, migration 16 applied): the enum has
+/// exactly the six labels below, and as the least-privileged role `UPDATE "asset" SET "status" =
+/// 'sold'` is refused **22P02 invalid input value for enum "AssetStatus"** — at TYPE PARSE, before
+/// any trigger runs — as is its Arabic spelling `'مبيع'`. What the ruling changes is WHOSE decision
+/// the exclusion is: his, not engineering's caution. By extension (the memo's reading, not his own
+/// words) it also confirms the six-value vocabulary INCLUDING the split below.
+///
+/// ⊕ NEW FACT FROM THE SAME ANSWER, recorded because nothing else in the repo carried it: **on
+/// expropriation the government replaces the parcel with a SIMILAR-VALUED ASSET.** So the expected
+/// flow is expropriation → replacement corpus asset, which is the `Expropriation` → istibdal model
+/// this schema already has. The replacement asset — and any proceeds — are CORPUS (asl / أصل): a
+/// receipt must be entered as `receiptClass = CAPITAL`, which the distribution waterfall excludes by
+/// construction (Binding rule 1). The `EXPROPRIATED` status therefore records a taking, never a
+/// disposal of value out of the endowment.
+///
+/// ⚠ `expropriated/substituted` IS SPLIT INTO TWO — engineering's refinement (D-A), confirmed only
+/// BY EXTENSION in memo Q9's reading and not in the owner's own words, so the split is recorded as
+/// his working vocabulary rather than as an explicit ruling on the split itself. An expropriation is
+/// a government taking; an istibdal is the Nazir's own substitution and carries a ≤10-business-day
+/// Authority notice (⚠ unverified — confirm vs primary law).
+///
+/// ⚠ THE ar/en LABELS ARE NOT HERE AND ARE STILL NOT DECIDED — memo Q9 did NOT address them, and the
+/// memo says so ("The Arabic labels were not addressed and therefore stay flagged"). The strings in
+/// `packages/i18n/messages/{ar,en}.json` are engineering's rendering of ordinary property terms, NOT
+/// product-approved legal copy; they are owed to the same E10/E12 review path as the distribution
+/// statement copy. Do not treat them as confirmed because the VALUES now are.
+///
+/// RESERVED (a transition INTO one needs an approved reserved matter — BR-306, enforced by
+/// `qmulate_asset_identity_guard()`): `EXPROPRIATED`, `SUBSTITUTED_ISTIBDAL`.
+enum AssetStatus {
+  ACTIVE
+  FULLY_RENTED
+  PARTIALLY_RENTED
+  VACANT
+  EXPROPRIATED
+  SUBSTITUTED_ISTIBDAL
+}
+
+enum VerificationStatus {
+  VERIFIED
+  PENDING
+  UNVERIFIED
+}
+
+enum TxnType {
+  REVENUE
+  EXPENSE
+}
+
+enum ExpenseCategory {
+  MAINTENANCE
+  OPERATIONS
+  NAZIR_FEE
+  ZAKAT
+  OTHER
+}
+
+/// BINDING RULE 1 (corpus/income segregation).
+/// `asl` (أصل, corpus) and `ghallah` (غلة, income) are distinct and never mixed.
+/// ONLY `INCOME`-class receipts may enter the distribution waterfall. `CAPITAL` receipts —
+/// explicitly SALE and ISTIBDAL (substitution) proceeds — are corpus and are BLOCKED from
+/// distribution; they flow back into corpus.
+enum ReceiptClass {
+  INCOME
+  CAPITAL
+}
+
+/// Which corpus event produced a CAPITAL receipt. Required whenever `receiptClass = CAPITAL`
+/// (enforced by a DB CHECK in the hand-written constraints migration).
+enum CapitalSource {
+  SALE_PROCEEDS
+  ISTIBDAL_PROCEEDS
+  EXPROPRIATION_COMPENSATION
+  OTHER
+}
+
+/// Nazir remuneration basis. Set by the DEED (Nazarah Art. 11), not by statute.
+/// ⚠ unverified — confirm vs primary law
+enum FeeBasis {
+  PERCENT_OF_REVENUE
+  PERCENT_OF_NET_INCOME
+  RETAINER
+}
+
+/// Which endowment classes an obligation applies to.
+///
+/// ⊕ S8-Q3 (product owner, 2026-08-23): "Adopt §09's five gates." `EXCLUDE_DIRECT` and `HAS_INCOME`
+/// were used by §09's obligation-library table and existed in no enum, which left SEVEN of its 37
+/// templates unrepresentable — including the distribution duty itself.
+///
+/// ⚠ `HAS_INCOME` IS A RUNTIME PREDICATE, not a class set. §09 says so in terms: it applies to any
+/// class where the endowment records revenue or expense IN THE PERIOD. `packages/domain` therefore
+/// keeps it OUT of `CLASSIFICATION_GATE_MATRIX` and makes looking it up there a compile error; the
+/// resolver takes the ledger fact as a separate input and REPORTS its absence rather than defaulting
+/// (false silently drops four obligations, true tells a moneyless endowment it owes bank
+/// reconciliation).
+///
+/// ⚠ `LARGE_ONLY` IS RETIRED — refused, NOT remapped (the JOINT/ADR-0004 precedent). Zero §09 rows
+/// and zero fixture rows ever used it, so there is nothing to migrate; the member stays so an old
+/// record still reads, and the ENGINE refuses a catalogue row carrying it (its own bucket, never
+/// folded into "excluded" — a silently excluded duty leaves no trace).
+///
+/// ⚠ unverified — confirm vs primary law
+enum ClassificationGate {
+  ALL
+  LARGE_MEDIUM
+  SMALL_DIRECT
+  EXCLUDE_DIRECT
+  HAS_INCOME
+  LARGE_ONLY
+}
+
+/// Canonical filing-status set (§07 / §14). `ACCEPTED` = e.g. the Awqaf platform's "registered".
+enum FilingStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  SUBMITTED
+  ACCEPTED
+  REJECTED
+  N_A
+}
+
+/// The six authoritative government platforms (§07 §8). These are MANUAL status fields —
+/// no public APIs are evidenced in the source material, so there are no live integrations.
+enum GovernmentPlatform {
+  AWQAF_DIGITAL
+  BALADI
+  EJAR
+  ISTIHKAM
+  MUQEEM
+  QIWA
+}
+
+/// The unified-framework's three workstreams.
+enum ComplianceSection {
+  FINANCIAL
+  OPERATIONAL
+  GOVERNMENT_LEGAL
+}
+
+/// §09 adds RETIRED / NOT_APPLICABLE — obligations are never deleted, only retired.
+enum ComplianceTaskStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+  RETIRED
+  NOT_APPLICABLE
+}
+
+/// §09 Engine A's `instantiatedReason` — WHY a task row exists. `INITIAL_SETUP` = the one-time
+/// register generation once classification is set (A1); `RECLASSIFICATION` = added by a
+/// classification change's diff (A4); `EVENT_TRIGGER` = raised by its trigger (the five event
+/// templates §09 names — vocabulary shipped with the engine, the trigger wiring is E8-adjacent
+/// and no path writes it yet, declared in the E7-completion stage log).
+enum TaskInstantiationReason {
+  INITIAL_SETUP
+  RECLASSIFICATION
+  EVENT_TRIGGER
+  /// S9-3b (owner ruling 2026-08-25, S9 first batch): a duty attached to an ALREADY-instantiated
+  /// register by the explicit maker≠checker act — never by a version bump alone. Rows with this
+  /// reason MUST carry `instantiatedByApprovalId` (CHECK, migration 39) and the database
+  /// re-verifies the approval at the row (`compliance_task_library_upgrade_authority`).
+  LIBRARY_UPGRADE
+}
+
+/// §09 Engine B's material-change trigger kinds — the three §09 names, closed:
+/// *"an asset added/disposed/substituted, a beneficiary added/removed/status-changed, or a
+/// trusteeship/Nazarah change"*. NO `OTHER` member, deliberately: an unclassifiable material
+/// change is one nobody can say what filing it belongs to, and a catch-all is where those go to
+/// stop being looked at.
+/// §09's BR-1004 escalation path, closed and in order: owner (Case Manager) → Nazir → Leadership.
+///
+/// The PATH is fixed vocabulary, NOT configuration — a ladder that reached Leadership before the
+/// Nazir is a mis-assembled config, not a policy. Only WHEN each rung engages is configurable
+/// (`deadline.escalationLadderBd` and its zero-tolerance twin). Spelled to match the domain's
+/// `ESCALATION_LEVELS`, and pinned against it.
+enum EscalationLevel {
+  CASE_MANAGER
+  NAZIR
+  LEADERSHIP
+}
+
+enum MaterialChangeKind {
+  ASSET
+  BENEFICIARY
+  NAZARAH
+}
+
+enum ApprovalType {
+  BANK_MOVEMENT
+  DISTRIBUTION_RUN
+  GOVT_FILING
+  /// S9-3b: "apply library vN to this register" — per endowment, maker≠checker, subject
+  /// `library:<version>`. NOT a reserved matter (S8-Q12: catalogue/register upkeep is not
+  /// retiring an endowment's record).
+  LIBRARY_UPGRADE
+  RESERVED_MATTER
+}
+
+/// NON-TERMINAL = `PENDING` | `APPROVED`. TERMINAL = `REJECTED` | `EXECUTED` | `VOID`.
+/// The transition lattice is enforced by the `approval_request_authority` trigger, not by
+/// application code: PENDING → APPROVED | REJECTED | VOID, APPROVED → EXECUTED | VOID, and
+/// nothing leaves a terminal state.
+///
+/// `VOID` was added in E2 (migration `00000000000003_e2_authority_guards`). §10 §4.3 says that
+/// when the approved subject changes after approval "the prior approval is **voided** and the item
+/// returns to re-submit" — and until E2 that was not a REPRESENTABLE state, so the only ways to
+/// express it were to leave a stale APPROVED row standing (a live second authority) or to rewrite
+/// history. Neither is acceptable, so the state now exists.
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXECUTED
+  VOID
+}
+
+/// `AML_RESTRICTED` = no-tipping-off compartment (§10, BR-604).
+enum Confidentiality {
+  NORMAL
+  SENSITIVE_PII
+  AML_RESTRICTED
+}
+
+enum DistributionStatus {
+  DRAFT
+  COMPUTED
+  PENDING_APPROVAL
+  APPROVED
+  EXECUTED
+  CANCELLED
+}
+
+/// §08 DistributionLine.status — a withheld share is NEVER reallocated.
+enum DistributionLineStatus {
+  PAID
+  WITHHELD
+  CROSS_BORDER_PENDING
+  EXCLUDED
+}
+
+/// §08 BeneficiaryInput.kind. `CATEGORY_ONLY` = beneficiary not yet individually identified;
+/// the category/characteristics must be captured before any disbursement (BR-206).
+enum BeneficiaryKind {
+  FAMILY
+  CHARITABLE_JIHA
+  CATEGORY_ONLY
+}
+
+/// Drives the BR-511 cross-border payment path.
+enum BeneficiaryResidency {
+  DOMESTIC
+  CROSS_BORDER
+}
+
+/// The CANONICAL role set: §10's thirteen. Decided 2026-07-27 (user decision) — see
+/// `docs/decisions/ADR-0004-role-model-thirteen.md`.
+///
+/// Narrowed from the 16-value superset that shipped in Sprint 1 by removing three values:
+///   • `MANDATE_LEAD` — an older name for `CASE_MANAGER`. Synonym, removed.
+///   • `ACCOUNTANT`   — an older name for `FINANCE`. Synonym, removed.
+///   • `APPROVER`     — **removed, not remapped.** §10 does not model "approver" as a role at
+///     all: approval is an ACTION (`A*`) that the `nazir` holds. A standing APPROVER seat would
+///     create a second approval authority alongside the Nazir, which BR-105 (accountability
+///     stays with the Nazir, jointly & severally with an authorized rep) and BR-1103 (the RACI
+///     keeps accountability with the Nazir) both rule out. There is no successor value.
+///
+/// `SYSTEM_ADMIN` deliberately keeps its DB spelling and maps to §10's `admin` key through
+/// `DB_ROLE_TO_ROLE_KEY` — a storage value and a product key need not be the same string.
+enum Role {
+  SYSTEM_ADMIN
+  NAZIR
+  AUTHORIZED_REP
+  CASE_MANAGER
+  FINANCE
+  COMPLIANCE_OFFICER
+  AML_OFFICER
+  COUNSEL
+  AUDITOR
+  SUBCONTRACTOR
+  FAMILY_BOARD
+  LEADERSHIP
+  BENEFICIARY
+}
+
+enum AuditCategory {
+  ACCESS
+  MUTATION
+  APPROVAL
+  AUTH
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE_SOFT
+  APPROVE
+  REJECT
+  READ_SENSITIVE
+  EXPORT
+  LOGIN
+  LOGIN_FAILED
+  ACCESS_DENIED
+  FILING_STATUS_CHANGE
+  DISTRIBUTION_POST
+  AML_REPORT
+  /// S10/T2, migration 46 — the enum's FIRST widening. The sweep-coverage control's event: one
+  /// per endowment the deadline sweep seat holds no grant on (G-5's second bound made loud).
+  /// A record of something that did NOT happen, like LOGIN_FAILED/ACCESS_DENIED. ⚠ ar/en
+  /// statement copy DECLARED OWED (E10/E12) — see audit-action-vocabulary.test.ts's pin.
+  SWEEP_COVERAGE_GAP
+}
+
+enum AuditActorType {
+  USER
+  SYSTEM
+  SERVICE
+}
+
+/// `RESTRICTED` covers AML SAR events (no-tipping-off visibility).
+enum AuditClassification {
+  ROUTINE
+  SENSITIVE
+  RESTRICTED
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 2. CORE HIERARCHY — Client (family) → Waqif → Waqf (endowment) → { records }
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// The family / engagement grouping. One client can hold several waqifs.
+model Client {
+  id     String  @id @default(cuid())
+  /// Arabic-authoritative (NFR-01)
+  nameAr String
+  nameEn String?
+
+  waqifs      Waqif[]
+  memberships Membership[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  deletedAt DateTime?
+
+  @@map("client")
+}
+
+/// The endower (واقف). One waqif can have several endowments.
+model Waqif {
+  id       String  @id @default(cuid())
+  clientId String
+  client   Client  @relation(fields: [clientId], references: [id])
+  /// Arabic-authoritative (NFR-01)
+  nameAr   String
+  nameEn   String?
+
+  waqfs Waqf[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  deletedAt DateTime?
+
+  @@index([clientId])
+  @@map("waqif")
+}
+
+/// The endowment (وقف) — the central record; one certificate.
+model Waqf {
+  id                String             @id @default(cuid())
+  waqifId           String
+  waqif             Waqif              @relation(fields: [waqifId], references: [id])
+  certificateNumber String
+  deedNumber        String
+  classification    WaqfClassification
+  type              WaqfType
+  nature            WaqfNature
+  entitlementOrder  EntitlementOrder
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // SHART AL-WAQIF (شرط الواقف) — the founder's binding conditions.
+  //
+  // IMMUTABLE (BINDING RULE 1) — FULL STOP. Write-once at INSERT and NOT amendable at all:
+  // not by a direct edit, a migration, a backfill, a "correction", and NOT by any approval,
+  // however complete. Product-owner decision, restated unconditionally 2026-07-29; CLAUDE.md
+  // binding rule 1 was amended to match (it previously said "amendable only via an explicit
+  // authority-gated reserved-matter workflow" — superseded, see ADR-0006).
+  //
+  // Reserved-matter approval still governs the OTHER reserved matters (istibdal and asset
+  // disposal, deed/certificate identity below, access-matrix changes) but is NOT a key to these
+  // columns, because there is no key. A change directed by an authority or a court is recorded
+  // as a SUPERSEDING INSTRUMENT — a new record — never as an edit to this one.
+  //
+  // ENFORCEMENT IS AT THE DATABASE, not in application code: the `waqf_shart_immutable`
+  // BEFORE UPDATE row trigger (hand-written constraints migration) rejects any change to
+  // `shartAlWaqif` or `shartAlWaqifVersion` with SQLSTATE 42501 unless the transaction-local
+  // GUC `qmulate.reserved_matter_approval_id` is set — and that GUC is set only by
+  // `withReservedMatter()` after it has verified an APPROVED, maker≠checker ApprovalRequest
+  // of type RESERVED_MATTER for this waqf. A migration or backfill hits the same trigger:
+  // that is the point.
+  //
+  // SHAPE: STRUCTURED JSON, not prose — it is the distribution engine's brain (tiers, lines,
+  // order rule, maintenance-reserve rule, disbursement channel / masraf al-rei, Nazir-fee
+  // basis, completeness flags).
+  //
+  // ⚠ CORRECTED IN S4/E3. This comment used to say the shape is "validated by `shartAlWaqifSchema`
+  // in `@qmulate/domain/shart`". THAT MODULE DOES NOT EXIST, and never has. The schema lives in
+  // `packages/database/src/seed/shart.ts`, which was deliberately written with zero internal
+  // imports so it could be MOVED there verbatim — and the move was never made, so the comment
+  // named a location instead of a fact. Moving it in S4 would put one file under two agents'
+  // ownership, so S4 extended it in place and corrected this line. THE MOVE IS STILL OWED (E5+):
+  // the seed and the engine should share one definition, and today the engine's own Shart reading
+  // comes from its caller-supplied run input rather than from this JSON.
+  //
+  // The deed's original text is kept as a `Document` for provenance; the structured form is
+  // what the software acts on (BR-103). On `SHART_INCOMPLETE` the engine HALTS and never
+  // guesses the founder's intent.
+  // ─────────────────────────────────────────────────────────────────────────
+  shartAlWaqif           Json
+  /// Bumped ONLY by an authority-gated reserved-matter amendment. Guarded by the same
+  /// `waqf_shart_immutable` trigger as `shartAlWaqif` itself.
+  shartAlWaqifVersion    Int      @default(1)
+  shartAlWaqifSetAt      DateTime
+  shartAlWaqifSetAtHijri String
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // DEED TERMS THAT ARE FOUNDER'S CONDITIONS BUT COULD NOT BE WRITTEN AT INSERT (S4/E3)
+  //
+  // ⚠ THESE ARE WRITE-ONCE AT THE DATABASE, TIER 3 of `qmulate_shart_guard()` (migration 12).
+  // NULL -> value is permitted exactly once; value -> anything (INCLUDING back to NULL) raises
+  // SQLSTATE 42501 with a message pointing at the superseding-instrument rule. They are founder's
+  // conditions, so landing them as plain columns would have re-opened ADR-0006's hole through a new
+  // column — but they cannot join tier 1 (never-writable) either, because a term that is illegible
+  // at intake would then be unrecordable for ever. Write-once is the reading that keeps both true.
+  //
+  // ⚠ NO `@default` ON ANY OF THEM (CLAUDE.md binding rule 6). A defaulted continuation
+  // stipulation is code choosing which of the waqif's lines continue; a defaulted reversion is a
+  // defaulted answer to "where does this endowment go when the family ends?". Absent must keep
+  // HALTING at the engine, which is the fail-safe direction.
+  //
+  // ⚠ AND DELIBERATELY NO CHECK CONSTRAINT of the form
+  // `entitlementOrder = 'LINEAGE_CONTINUATION' => continuationStipulation IS NOT NULL`. That would
+  // make the DATABASE refuse to RECORD an incomplete deed, when the required behaviour is to record
+  // it and have the ENGINE halt (`SHART_INCOMPLETE` / `CONTINUATION_STIPULATION_UNRECOGNISED`).
+  // A Nazir must be able to see the halt.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /// Which of the waqif's lines the deed continues (ADR-0009 R2). Nullable because a خيري or
+  /// direct-use deed legitimately has no continuation term, and because a term may be illegible at
+  /// intake. NO DEFAULT — absent halts at the engine, it is never assumed.
+  continuationStipulation ContinuationStipulation?
+
+  /// HAS ANYONE READ THE DEED'S مآل CLAUSE YET? Required, no default — and the reason is precise.
+  ///
+  /// The engine's `reversion` input is two-state: `null` means THE DEED RECORDS NO مآل (R7-c —
+  /// never inferred, Binding rule 1). But a nullable `reversionKind` alone makes NULL the state of
+  /// every row created before anyone read the deed, so "nobody has looked yet" would silently
+  /// assert "there is no ultimate taker". A REQUIRED Boolean with NO DEFAULT forces every INSERT to
+  /// say which it is. `false` means the mapper must REFUSE to build a distribution run input at all
+  /// — a caller-side refusal, NOT a new engine discriminator.
+  ///
+  /// Write-once in the `false -> true` direction only (migration 12, tier 3).
+  ///
+  /// ⚠ AND THE FLIP MUST CARRY ITS DATE, IN ONE STATEMENT (migration 14, tier 3a — AV-1). Until
+  /// then the flag moved ALONE: `UPDATE "waqf" SET "reversionClauseCaptured" = true` committed by
+  /// itself (MEASURED as `qmulate_app` on waqf-005), tier 3 then sealed the whole مآل group, and the
+  /// endowment was left permanently recording that the founder named NO ultimate taker — from a
+  /// half-saved intake form. `false -> true` now requires `reversionRecordedAt` +
+  /// `reversionRecordedAtHijri` in the same UPDATE, and CHECK
+  /// `waqf_reversion_recorded_at_pairs_with_capture` enforces the same pairing on INSERT, which no
+  /// trigger on this table sees.
+  reversionClauseCaptured Boolean
+
+  /// مآل الوقف's kind. NULL + `reversionClauseCaptured = true` means the deed POSITIVELY RECORDS NO
+  /// ultimate taker, which is a statement, not an omission. NO DEFAULT.
+  reversionKind ReversionKind?
+
+  /// WHEN somebody read the deed's مآل clause — the provenance of a founder's condition, dual-dated
+  /// per convention 2, set with the clause and write-once with it.
+  ///
+  /// ⚠ IT PAIRS WITH `reversionClauseCaptured`, NOT WITH `reversionKind` (migration 14). Pairing it
+  /// with the KIND — migration 12's `waqf_reversion_recorded_at_pairs_with_kind`, now DROPPED — meant
+  /// a deed recording no ultimate taker carried no date, which is what left the flag free to move on
+  /// its own. Reading a clause is an act performed by somebody on a day whatever the clause turns
+  /// out to say. CHECKs: non-null iff `reversionClauseCaptured`
+  /// (`waqf_reversion_recorded_at_pairs_with_capture`), both dates null or both non-null
+  /// (`waqf_reversion_recorded_dual_dated`), and a non-null `reversionKind` requires them
+  /// (`waqf_reversion_kind_requires_recorded_at`).
+  reversionRecordedAt      DateTime?
+  reversionRecordedAtHijri String?
+
+  /// ⊕ S9-4a — ذات انتفاع مباشر, the ORTHOGONAL USAGE AXIS (owner ruling, fifth batch, 2026-08-25).
+  ///
+  /// Whether this endowment's benefit is the DIRECT USE of the asset rather than its yield. It sits
+  /// ALONGSIDE `classification`, not inside it: an endowment can be SMALL and direct-use, or MEDIUM
+  /// and not.
+  ///
+  /// ⚠⚠ **NULL MEANS UNRECORDED. IT NEVER MEANS "NOT DIRECT".** The ruling's own words: *"no default
+  /// — an endowment whose usage is unrecorded is UNRECORDED, not 'not direct'."* That is why this is
+  /// NULLABLE with NO DEFAULT rather than a required Boolean: `false` would be a positive claim that
+  /// the benefit is the yield, and a defaulted `false` would make that claim on behalf of every
+  /// endowment nobody has looked at. The gate resolver REFUSES to gate on NULL
+  /// (`DIRECT_USE_UNRECORDED`) exactly as the distribution engine halts on an absent
+  /// `continuationStipulation` — an unrecorded fact stops the machine, it does not pick a side.
+  ///
+  /// ⚠ This doc comment is deliberate and load-bearing: `registrationDate` sits four lines below
+  /// with NO doc comment at all, and that silence is how S9-3c's `REGISTER_30BD` mis-wiring class
+  /// starts. Semantics belong where the column lives.
+  directUtilization Boolean?
+
+  fiscalYearEnd          String
+  /// The date the endowment's Authority REGISTRATION was completed — the registration ITSELF (fixture
+  /// values 1980-03-11 … 2015-09-10). ⚠ It is NOT the anchor of the 30-business-day `REGISTER_30BD`
+  /// window: counting that window from the completion of the very act it governs is vacuously met or
+  /// decades overdue, and neither is a deadline. The anchor is `registrationAnchorDate` below. (This
+  /// doc comment was the "small owed item" `deadlines/anchors.ts` recorded on 2026-08-27; landed S11-1.)
+  registrationDate       DateTime
+  registrationDateHijri  String
+  certificateExpiry      DateTime?
+  certificateExpiryHijri String?
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // ⊕ S11-1 — THE `REGISTER_30BD` CLOCK-START, AS RECORDED OPERATOR INPUT (owner ruling 2026-08-31,
+  // commit 9f3d8fd, verbatim: "the stating dates for now should be an input field that i can put.
+  // once there is clarity we can refine down th eline and increase governance").
+  //
+  // A human enters it; NOTHING derives, infers or defaults it. The KIND travels with the date (see
+  // `RegistrationAnchorKind`). NO DEFAULT on any of the three. Two CHECKs (migration 48): the dual
+  // pair moves together (`waqf_registration_anchor_dual_dated`) and the kind is present exactly when
+  // the date is (`waqf_registration_anchor_kind_pairs_with_date`) — a bare date is what the owner
+  // ruled against, a kind alone is nothing.
+  //
+  // ⚠ BLANK MEANS "CANNOT COMPUTE", NEVER "NO DEADLINE" (the condition attached to the ruling). An
+  // unrecorded anchor makes the engine refuse `REGISTER_30BD` for this endowment BY NAME
+  // (`ANCHOR_SOURCE_VALUE_ABSENT`); no screen may render that refusal as "nothing due".
+  //
+  // ⚠ NOT write-once — RULED (owner, 2026-09-02, commit f57e13d: "i should be able to edit dates …
+  // audit log maintain record"): a plain audited UPDATE the operator can correct, with the audit
+  // trail's before/after image as the history. A correction does NOT edit the frozen `Deadline` it
+  // produced — it INSERTS a new `Deadline` chained by `recomputedFromId` (migration 38's only
+  // recompute path). ⚠ "Remove red" by editing this date is NOT a sanctioned use: the discharge
+  // mechanism (`met`/`waived`/other) is back with the owner and is not built in S11-1.
+  // ─────────────────────────────────────────────────────────────────────────
+  registrationAnchorDate      DateTime?
+  registrationAnchorDateHijri String?
+  registrationAnchorKind      RegistrationAnchorKind?
+
+  // relations
+  trusteeship       TrusteeshipDeed?
+  onboardingGates   OnboardingGate[]
+  reversionTakers   WaqfReversionTaker[]
+  assets            Asset[]
+  beneficiaries     Beneficiary[]
+  bankAccounts      BankAccount[]
+  transactions      Transaction[]
+  distributions     Distribution[]
+  nazirFees         NazirFee[]
+  complianceTasks   ComplianceTask[]
+  filings           GovernmentFiling[]
+  deadlines         Deadline[]
+  materialChanges   MaterialChange[]
+  escalationEvents  EscalationEvent[]
+  documents         Document[]
+  leases            Lease[]
+  legalCases        LegalCase[]
+  budgets           Budget[]
+  zakatFilings      ZakatFiling[]
+  expropriations    Expropriation[]
+  accessGrants      WaqfAccessGrant[]
+  reclassifications ReclassificationEvent[]
+  approvalRequests  ApprovalRequest[]
+  amlReports        AmlReport[]
+  settings          Setting[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  deletedAt DateTime?
+
+  @@unique([certificateNumber])
+  @@index([waqifId])
+  @@index([classification])
+  @@index([deedNumber])
+  @@map("waqf")
+}
+
+/// **مآل الوقف — the ultimate taker(s) the deed NAMES** (R7, product owner 2026-08-10).
+///
+/// ── WHY A JOIN TABLE AND NOT A FLAG ON `Beneficiary` ──────────────────────────────────────────
+/// R7 rejected `Beneficiary.ultimateTaker Boolean` and a fourth `BeneficiaryKind` member for four
+/// recorded reasons, chief among them that a boolean has ONE trusted side — which is exactly how
+/// S3-D1 shipped — and that a fourth kind would have moved `BENEFICIARY_KINDS` out of the parity
+/// test's `MUST_MATCH` block and owed a SECOND migration. The clause NAMES ids, at WAQF level, so
+/// the deed has two sides that must agree: the clause says who, and the resolver verifies each id
+/// exists in this endowment, is a `CHARITABLE_JIHA`, and carries no lineage edge.
+///
+/// ── WHAT THE STRUCTURE ITSELF GUARANTEES ──────────────────────────────────────────────────────
+/// The FK is COMPOSITE — `(waqfId, beneficiaryId) -> Beneficiary(waqfId, id)` — so a taker from
+/// ANOTHER endowment is structurally unrepresentable rather than merely refused. `@@unique` is the
+/// second side of the resolver's "repeated id" refusal (`REVERSION_ULTIMATE_TAKER_DUPLICATED`): a
+/// repeat is never deduplicated, because it would double-count in the weight vector and MOVE MONEY.
+///
+/// ── WHAT IS DELIBERATELY *NOT* ENFORCED HERE ──────────────────────────────────────────────────
+/// That the taker is a `CHARITABLE_JIHA` with `lineageLink = null` and `tabaqa = null` is enforced
+/// by the ENGINE's resolver and NOT by a database trigger. R7 answered only that a ذري deed may end
+/// at a charity; `REVERSION_KIND_UNRECOGNISED` exists precisely because a deed may instead revert to
+/// another waqf, to the Authority or to the waqif's nearest relatives — none of which is a
+/// `CHARITABLE_JIHA`. Hardening a rule whose fiqh half is unconfirmed into a CHECK would make
+/// relaxing it a migration. See migration 12 §2 for the same reasoning applied to the خيري mirrors.
+///
+/// NO `updatedAt` and NO `deletedAt`: a row here is write-once with the clause, and
+/// `waqf_reversion_taker_no_mutate` (migration 12) refuses UPDATE, DELETE and TRUNCATE with 42501 —
+/// this row decides where the endowment goes when the family ends.
+///
+/// Weights are NOT duplicated here. A taker's share is its existing `Beneficiary.stipulatedWeight`
+/// — one figure, one place.
+model WaqfReversionTaker {
+  id            String      @id @default(cuid())
+  waqfId        String
+  waqf          Waqf        @relation(fields: [waqfId], references: [id])
+  beneficiaryId String
+  beneficiary   Beneficiary @relation("WaqfUltimateTaker", fields: [waqfId, beneficiaryId], references: [waqfId, id])
+
+  createdAt DateTime @default(now())
+  createdBy String?
+
+  @@unique([waqfId, beneficiaryId])
+  @@index([waqfId])
+  @@map("waqf_reversion_taker")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 3. TRUSTEESHIP & ELIGIBILITY (§07 §3)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// The Nazir appointment. A Waqf must have exactly one.
+/// A Waqf cannot leave onboarding Gate 01 unless the eligibility flags satisfy BR-109/NFR-09 —
+/// in particular `ksaResident = true`.
+/// ⊕ S12-3 · THE ONBOARDING GATE (BR-1101). One row per (endowment, gate); three rows are written at
+/// intake, all OPEN. Clearing is a RECORDED HUMAN ACT: `clearedBy` is the session, `clearedAt` is
+/// dual-dated (ADR-0007), `evidence` carries the operating model's checklist as the clearer attested
+/// it, and `note` is free text. The mechanical prerequisites (a verified deed and a recorded
+/// classification for Gate 01, a dedicated bank account for Gate 02, a beneficiary registry for
+/// Gate 03 unless direct-use) are COMPUTED at clear time by the api from the record, never stored.
+///
+/// WHAT A GATE BLOCKS (V-11, §17 E11 exit): a distribution run and an Authority filing submission
+/// are refused while Gate 02 is not CLEARED — at the api (`ONBOARDING_GATE_NOT_CLEARED`, naming the
+/// gate) AND at the database (`distribution_onboarding_gate` on INSERT,
+/// `government_filing_onboarding_gate` on the move to SUBMITTED). Gate 01 gates nothing downstream
+/// directly: it gates Gate 02 (the order trigger). Gate 03 gates cadence, which is reporting.
+///
+/// Rows are never deleted (`_no_delete`, `_no_truncate`); a gate cleared in error is REOPENED, which
+/// is a recorded transition, not an erasure. ⚠ Q4 (the human checklist's exact content) was put to
+/// the owner and not answered; `OPERATING_MODEL_GATE_CHECKLIST` in `@qmulate/domain` is engineering's
+/// reading of the operating model's own list and is corrected by config, not code.
+model OnboardingGate {
+  id            String               @id @default(cuid())
+  waqfId        String
+  waqf          Waqf                 @relation(fields: [waqfId], references: [id])
+  gate          OnboardingGateKind
+  status        OnboardingGateStatus
+  clearedAt      DateTime?
+  clearedAtHijri String?
+  clearedBy      String?
+  /// The operating model's checklist for this gate, as attested by the clearer: `{ item: true }`.
+  evidence      Json?
+  note          String?
+  /// Set on REOPEN (owner ruling: a Nazir may reopen, with a reason). Cleared again → NULL.
+  reopenedAt      DateTime?
+  reopenedAtHijri String?
+  reopenedBy      String?
+  reopenReason    String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  deletedAt DateTime?
+
+  @@unique([waqfId, gate])
+  @@index([waqfId, status])
+  @@map("onboarding_gate")
+}
+
+model TrusteeshipDeed {
+  id                              String    @id @default(cuid())
+  waqfId                          String    @unique
+  waqf                            Waqf      @relation(fields: [waqfId], references: [id])
+  primaryNazir                    String
+  primaryAppointedDate            DateTime
+  primaryAppointedDateHijri       String
+  /// The authorized representative is JOINTLY AND SEVERALLY liable (Nazarah Art. 11(5));
+  /// their actions carry `onBehalfOfId` in the audit trail (BR-105).
+  /// ⚠ unverified — confirm vs primary law
+  authorizedRepName               String?
+  authorizedRepScope              String?
+  authorizedRepAppointedDate      DateTime?
+  authorizedRepAppointedDateHijri String?
+  jointlyLiable                   Boolean   @default(false)
+  successorNazir                  String?
+
+  // Nazir eligibility flags (BR-109 / NFR-09) — verified at onboarding.
+  islam                      Boolean
+  legalCapacity              Boolean
+  noDisqualifyingRemoval     Boolean
+  /// Hard rule: Beneficial Ownership Standards Art. 8(1).
+  /// ⚠ unverified — confirm vs primary law
+  ksaResident                Boolean
+  /// Foreign endower + real-property asset.
+  /// ⚠ unverified — confirm vs primary law
+  saudiNationalWhereRequired Boolean?
+  /// Legal-person Nazir.
+  /// ⚠ unverified — confirm vs primary law
+  authorityLicensed          Boolean?
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // THE AUTHORIZED REPRESENTATIVE'S OWN ELIGIBILITY (BR-109) — landed S4/E3
+  //
+  // BR-109 requires eligibility for "Nazir AND authorized-representative", and until S4 this model
+  // carried ONE set of flags, for the primary Nazir only. So a NON-RESIDENT authorized
+  // representative — jointly and severally liable under Nazarah Art. 11(5) — passed unchecked.
+  //
+  // CHECK (migration 12) is ONE-DIRECTIONAL: a flag may only be present when a representative is
+  // recorded. An eligibility record about NOBODY is unrepresentable — but "recorded representative,
+  // criterion NOT YET ASSESSED" stays representable on purpose, because the resolver's contract is
+  // that a required criterion arriving as `null` is a REFUSAL (`ELIGIBILITY_NOT_ASSESSED`), never a
+  // pass. A biconditional CHECK was tried first and rejected: it made that refusal unreachable and
+  // would have forced the migration to invent four assertions about a representative's religion,
+  // capacity, removal history and residency. Partial assessment is legal; intake learns these one
+  // at a time.
+  //
+  // ⚠ SURFACED, NOT RESOLVED (legal): WHICH of the seven criteria actually bind a representative,
+  // and whether rep non-residency BLOCKS or merely FLAGS, is a question for Saudi counsel. S4
+  // implements the FAIL-SAFE: `repKsaResident = false` blocks. ⚠ unverified — confirm vs primary law.
+  // ─────────────────────────────────────────────────────────────────────────
+  repIslam                  Boolean?
+  repLegalCapacity          Boolean?
+  repNoDisqualifyingRemoval Boolean?
+  /// ⚠ unverified — confirm vs primary law. Fail-safe: `false` blocks.
+  repKsaResident            Boolean?
+
+  /// WHEN, AND BY WHOM, the eligibility above was verified. BR-109 says CAPTURE **AND VERIFY** —
+  /// flags with no verification event record a CLAIM, not a verification, which is what shipped
+  /// before S4. Dual-dated per convention 2; `eligibilityVerifiedBy` is the acting user id, for
+  /// audit attribution. A deed may not be treated as eligibility-verified while these are null.
+  ///
+  /// ⚠ THESE THREE, AND THE TEN CRITERIA ABOVE, ARE THE **ASSESSMENT** SIDE OF THIS ROW — the one
+  /// part of it that a recorded appointment may still change (migration 18,
+  /// `qmulate_trusteeship_deed_assessment_columns()`). Migration 17 sealed the WHOLE row on the
+  /// owner's Q10 ruling and thereby made this obligation unrecordable on every appointment that
+  /// already existed (AV5-02, HIGH — measured: all five seeded deeds carry `null` here and
+  /// `deed.upsert`'s UPDATE branch returned a 500). They now move ONLY as a recorded verification
+  /// event: an ADVANCED `eligibilityVerifiedAt` with its Hijri pair and a verifier, in the same
+  /// statement, or the write is refused 42501. Every DEED FACT (who holds the nazarah, the
+  /// representative, `jointlyLiable`, the successor, `deletedAt`) stays write-once for every seat.
+  /// ⚠ That line between a deed fact and QMULATE's assessment OF the appointee is ENGINEERING'S
+  /// reading of the owner's sentence and is flagged for his confirmation.
+  eligibilityVerifiedAt      DateTime?
+  eligibilityVerifiedAtHijri String?
+  eligibilityVerifiedBy      String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  deletedAt DateTime?
+
+  @@map("trusteeship_deed")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 4. ASSETS & EXPROPRIATION (§07 §4)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Property tied to an endowment. Disposal / substitution / pledge / long-lease are
+/// RESERVED MATTERS — they require an approved `ApprovalRequest` before the mutation
+/// is allowed (BR-306).
+model Asset {
+  id                 String      @id @default(cuid())
+  /// WHICH ENDOWMENT OWNS THIS PARCEL — part of the parcel's identity, and NEVER editable
+  /// (migration 14, AV-4). MEASURED before that guard, as `qmulate_app` with no approval:
+  /// `UPDATE "asset" SET "waqfId" = 'waqf-002' WHERE "id" = 'asset-001'` COMMITTED — one statement
+  /// moving corpus out of one waqif's endowment and into another's, with no reserved matter, no
+  /// `Expropriation` row, and no trace on either asset register. Refused OUTRIGHT rather than gated:
+  /// no ACT is being recorded. Corpus leaves an endowment by expropriation or istibdal (each a
+  /// reserved matter with its own row) and arrives at another by acquisition; record both.
+  waqfId             String
+  waqf               Waqf        @relation(fields: [waqfId], references: [id])
+  /// residential_building | commercial_building | commercial_tower | land_parcel | …
+  type               String
+  titleDeedNumber    String
+  /// Arabic-authoritative (NFR-01)
+  addressAr          String
+  addressEn          String?
+  acquiredDate       DateTime
+  acquiredDateHijri  String
+  valuationSar       Decimal     @db.Decimal(18, 2)
+  valuationDate      DateTime?
+  valuationDateHijri String?
+  /// CLOSED vocabulary since migration 13 — see {@link AssetStatus}. Was `String @default("active")`
+  /// with no CHECK, which is how the Arabic spelling of a disposal committed with no reserved-matter
+  /// approval (V-E3-02, measured).
+  ///
+  /// The default is kept at `ACTIVE` — the base state of an endowed asset, and the value the column
+  /// already defaulted to — so no `asset.create` contract changes. No RESERVED value is reachable by
+  /// default: `EXPROPRIATED` and `SUBSTITUTED_ISTIBDAL` require an explicit write, and a transition
+  /// into either requires an approved reserved matter (BR-306).
+  ///
+  /// ⚠ INSERT **IS** GATED SINCE MIGRATION 14 (V1/AV-5). It was not until then, and the residual
+  /// migration 13 named turned out to be C-10 one table over: as `qmulate_app` with no approval,
+  /// `INSERT … 'EXPROPRIATED'` and `INSERT … 'SUBSTITUTED_ISTIBDAL'` both COMMITTED while the UPDATE
+  /// into either was refused 42501 — the identical act, refused as a transition and committed as a
+  /// birth. `asset_identity_guard` is now `BEFORE INSERT OR UPDATE`. Transcribing an endowment whose
+  /// parcel was expropriated decades ago is still possible and is the intended route: create it in
+  /// an ORDINARY status (all four ungated), then record the disposal as the TRANSITION it was, which
+  /// is also what produces the audit event and lets an `Expropriation` row name the taking.
+  status             AssetStatus @default(ACTIVE)
+
+  leases             Lease[]
+  maintenanceTickets MaintenanceTicket[]
+  expropriations     Expropriation[]
+  transactions       Transaction[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  /// SOFT-RETIRING A CORPUS PARCEL IS A RESERVED MATTER (migration 14, AV-4). `asset_no_delete`
+  /// refuses the hard DELETE and names this column as the only legal retirement, and that path had
+  /// nothing on it: `UPDATE "asset" SET "deletedAt" = now()` COMMITTED as `qmulate_app` with no
+  /// approval (MEASURED). A retired parcel leaves every register the Nazir, the classification bands
+  /// and the Authority report read from, so in substance it is a disposal. ANY change is gated,
+  /// including back to NULL. ⚠ TODO(surface): whether EVERY retirement is reserved — as opposed to
+  /// only those that are disposals in substance — is the PRODUCT OWNER'S call. This is the fail-safe
+  /// reading and it refuses a route rather than disposing of anything.
+  deletedAt DateTime?
+
+  /// FK TARGET for the anti-commingling composite keys (migration 19 §1) — `transaction`,
+  /// `lease` and `expropriation` each reference `(waqfId, id)` so a parcel of one endowment
+  /// cannot be named by another endowment's row.
+  @@unique([waqfId, id], name: "asset_waqfId_id_key")
+  @@index([waqfId])
+  @@index([titleDeedNumber])
+  @@map("asset")
+}
+
+/// A government taking of endowed land → compensation → istibdal (substitution).
+/// Entity NOW; full workflow Phase 3.
+///
+/// BINDING RULE 1: compensation and any istibdal proceeds are CORPUS (asl), not income.
+/// They must land in a dedicated waqf account (no commingling) and are blocked from the
+/// distribution waterfall (see `Transaction.receiptClass` / `capitalSource`).
+model Expropriation {
+  id                         String    @id @default(cuid())
+  assetId                    String
+  asset                      Asset     @relation(fields: [assetId], references: [id])
+  waqfId                     String
+  waqf                       Waqf      @relation(fields: [waqfId], references: [id])
+  /// Arabic-authoritative (NFR-01)
+  authorityAr                String
+  /// partial | full
+  scope                      String
+  announcedDate              DateTime
+  announcedDateHijri         String
+  compensationSar            Decimal?  @db.Decimal(18, 2)
+  /// assessed | received | …
+  compensationStatus         String
+  /// pending_authority_permission | replacement_acquired | …
+  istibdalStatus             String
+  /// Plain column, not an FK — a self-referential Asset relation would force a
+  /// back-relation array on Asset for a Phase-3 workflow that does not exist yet.
+  replacementAssetId         String?
+  /// The Authority-notice window is NOT a column. It resolves from
+  /// `Setting['deadline.ISTIBDAL_10BD.businessDays']` (configurable, not hard-coded).
+  /// ⚠ unverified — confirm vs primary law
+  authorityNotifiedDate      DateTime?
+  authorityNotifiedDateHijri String?
+  /// ⊕ S11-1 — the istibdal COMPLETION date: §09's anchor for `ISTIBDAL_10BD` ("notify the
+  /// Authority within 10 bd of completion", Art. 12(3) — ⚠ figure unverified vs primary law).
+  /// RECORDED OPERATOR INPUT (owner ruling 2026-08-31, commit 9f3d8fd), never derived: not from
+  /// `announcedDate` (the taking's announcement), not from `authorityNotifiedDate` (the duty's
+  /// DISCHARGE — deriving from it would make every notification exactly on time), not from the
+  /// replacement asset's acquisition. NO DEFAULT; dual pair moves together (CHECK
+  /// `expropriation_istibdal_completed_dual_dated`). Blank ⇒ the engine refuses `ISTIBDAL_10BD` for
+  /// this record BY NAME — never "nothing due".
+  ///
+  /// ⚠ This column sits on `Expropriation` because it is the ONLY home the schema has for an istibdal
+  /// at all. Whether VOLUNTARY (non-expropriation) istibdal is in Phase-1 scope is UNASKED and
+  /// undecided (the memo's own open item); the name presumes nothing about expropriation so a later
+  /// home can mirror it without a rename. If voluntary istibdal is ruled out of Phase 1, that must be
+  /// written down as a deliberate exclusion rather than left looking like an oversight.
+  istibdalCompletedDate      DateTime?
+  istibdalCompletedDateHijri String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  deletedAt DateTime?
+
+  @@index([waqfId])
+  @@index([assetId])
+  @@map("expropriation")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 5. BENEFICIARIES & UBO (§07 §5) — the most sensitive data in the system
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Mustahiq / mawquf ʿalayh (الموقوف عليه).
+///
+/// ── ⚠ CORRECTED IN S4/E3 (ADR-0009 + R-FRONTIER + R6). READ THIS BEFORE USING `tabaqa`. ───────
+/// This comment used to say eligibility "is a function of `tabaqa` (tier) + `line` + the waqf's
+/// `entitlementOrder`". That is no longer the primary key, and `tabaqa` is NO LONGER A TRUSTED
+/// INPUT at all:
+///
+///  · Entitlement is **lineage-based and per capita over the LIVING FRONTIER of each line**
+///    (R-FRONTIER, product owner 2026-08-03). A member is entitled only if EVERY ancestor strictly
+///    between them and the waqif is deceased; a living ancestor HOLDS the entitlement and their
+///    descendants wait (`ENTITLEMENT_HELD_BY_LIVING_ANCESTOR` — a **TEMPORARY** exclusion that
+///    reverses on that ancestor's death).
+///  · `tabaqa` is DERIVED from `parentId` depth and CROSS-CHECKED against the recorded value; a
+///    disagreement HALTS (`TABAQA_MISMATCHES_LINEAGE_DEPTH`) rather than one side winning.
+///  · `ORDERED` (al-aʿlā fa-l-aʿlā) is the OPT-IN EXCEPTION, not the default.
+///
+/// ⚠ **NOTHING ANYWHERE MAY PERSIST AN EXCLUSION VERDICT.** There is no `excluded`, `ineligible`,
+/// `entitledCohort` or `lastComputedFrontier` column here, no materialized view and no cached
+/// cohort, and none may be added: the frontier is recomputed from the register every period and the
+/// ancestor walk is the only authority. A cached exclusion would keep paying the wrong branch after
+/// a death is recorded.
+///
+/// ⚠ **R6 (product owner, 2026-08-03): the lineage edge is REQUIRED ON EVERY DEED**, not only on
+/// lineage-order ones. A `FAMILY` or `CATEGORY_ONLY` member with no `lineageLink` halts every run
+/// (`SHART_INCOMPLETE` / `LINEAGE_LINK_MISSING`) on `ORDERED` and `SHARED` alike — eligibility comes
+/// from descent whatever rule the deed uses, and the engine will not pay someone it cannot place.
+/// So `parentId` and `lineageLink` are not an optional lineage-mode extra; they are the columns the
+/// whole model rests on. Measured before R6 landed: an unplaceable member took 78,000,000 of
+/// 78,000,000 halalas with no flag raised.
+///
+/// There is deliberately NO name field — neither §07 nor the fixture has one, and the UBO
+/// identity dataset is field-encrypted instead. Do not add one without a PDPL review.
+model Beneficiary {
+  id                    String               @id @default(cuid())
+  waqfId                String
+  waqf                  Waqf                 @relation(fields: [waqfId], references: [id])
+  /// family branch, or "Charitable" for the charitable slice
+  branch                String
+  /// Arabic-authoritative (NFR-01)
+  relationshipAr        String
+  relationshipEn        String?
+  kind                  BeneficiaryKind      @default(FAMILY)
+  residency             BeneficiaryResidency @default(DOMESTIC)
+  /// BR-206: where no beneficiary is yet individually identifiable, the category /
+  /// characteristics MUST be captured before any disbursement — otherwise the distribution
+  /// engine blocks the run.
+  categoryDescriptionAr String?
+  /// generational tier (طبقة); null for charitable causes.
+  /// ⚠ A CROSS-CHECK, NOT A TRUSTED INPUT — see the model comment. For any member of the lineage
+  /// graph the authoritative value is DERIVED from `parentId` depth.
+  tabaqa                Int?
+  line                  BeneficiaryLine
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // THE LINEAGE EDGE (ADR-0009 / R6 / R-FRONTIER) — landed S4/E3, migration 12
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /// The parent this member descends from, WITHIN THIS ENDOWMENT.
+  ///
+  /// ⚠⚠ **`null` MEANS "A CHILD OF THE WAQIF" (derived ṭabaqa 1). IT NEVER MEANS "UNKNOWN".**
+  /// The next reader will assume the opposite, so it is written here: the engine decides graph
+  /// MEMBERSHIP by `lineageLink !== null`, precisely so that `parentId: null` has exactly one
+  /// meaning. A member of the graph whose parent is genuinely unrecorded is REFUSED
+  /// (`LINEAGE_PARENT_UNKNOWN`) — it is not represented by a null.
+  ///
+  /// NO `@default`: a defaulted edge is a defaulted family tree.
+  ///
+  /// ⚠ THE COMPOSITE FK IS LOAD-BEARING. It references `[waqfId, id]`, not `id`, so a parent edge
+  /// pointing into ANOTHER endowment is structurally impossible rather than merely refused — which
+  /// is what the engine's `LINEAGE_PARENT_UNKNOWN` refusal is about. `onDelete/onUpdate: Restrict`
+  /// because deletion in this schema is SOFT ONLY and an orphaned edge is an unpayable line.
+  /// Migration 12 adds CHECK `"parentId" IS NULL OR "parentId" <> "id"` (no self-parent — the
+  /// engine's `LINEAGE_CYCLE`, closed at the row level); LONGER cycles stay the engine's to refuse,
+  /// because a cross-row cycle is not expressible as a row CHECK.
+  parentId String?
+  parent   Beneficiary?  @relation("BeneficiaryLineage", fields: [waqfId, parentId], references: [waqfId, id], onDelete: Restrict, onUpdate: Restrict)
+  children Beneficiary[] @relation("BeneficiaryLineage")
+
+  /// The ẓuhūr/buṭūn **ELIGIBILITY FACT** — see `enum LineageLink`.
+  ///
+  /// ⚠ **READ FOR EXACTLY ONE COMPUTATION** (the `ZUHUR_ONLY` intermediate-ancestor test) and NEVER
+  /// rendered as a person's gender: no UI label, no report column, no CSV export, no i18n key.
+  /// `null` = not a descendant of the waqif (a charitable jiha, including a recorded ultimate
+  /// taker, which carries neither this nor a `tabaqa`). NO `@default`: a defaulted `lineageLink` is
+  /// a defaulted answer to "does this person's line continue?".
+  lineageLink LineageLink?
+
+  /// The member's vital / in-scope status. **REQUIRED, NO `@default`** — §08 defaults it to `true`
+  /// and the engine deliberately refuses to, because a defaulted `active` is a defaulted VITAL
+  /// STATUS: it is the sole input to the `ORDERED` extinction test and one of three inputs to R7-d's
+  /// continuing-line predicate.
+  ///
+  /// ⚠ **IT IS A FACT ABOUT A WHOLE CHAIN, NOT ABOUT ONE ROW** (R-FRONTIER). One stale vital status
+  /// silently moves an entire branch's money, because an ancestor's `active` decides whether their
+  /// descendants are entitled at all. Read along the ANCESTOR WALK — `src/lineage.ts` /
+  /// `qmulate_beneficiary_ancestry()` — never row by row.
+  active Boolean
+
+  /// The CERTIFICATION of a death, dual-dated per convention 2.
+  ///
+  /// ⚠ WHY THESE EXIST SEPARATELY FROM `active`: `active: false` conflates a death with a scope
+  /// exit, and open defect R7-D1 turns on exactly that distinction — an unenumerated
+  /// `CATEGORY_ONLY` placeholder's `active: false` CANNOT certify that a family died out. They are
+  /// MAPPER-SIDE CONTEXT, not new engine input (the engine takes only `active`), so no engine
+  /// vocabulary is invented for them here.
+  /// CHECK (migration 12): `NOT ("active" AND "deceasedAt" IS NOT NULL)`, and both dual dates
+  /// present or both absent.
+  deceasedAt      DateTime?
+  deceasedAtHijri String?
+
+  /// From the Shart; relative weight, may be null when computed. Renormalized within the
+  /// entitled cohort by the distribution engine — these do not have to sum to 100.
+  ///
+  /// ⚠ NOT THE DEED WEIGHT THE ENGINE READS — see `stipulatedWeight` below. Its fate is E4's.
+  sharePercent Decimal? @db.Decimal(9, 4)
+
+  /// The DEED's relative weight for this beneficiary, normalised over the ENTITLED COHORT.
+  ///
+  /// ⚠ **A FIELD DISTINCT FROM `sharePercent` ON PURPOSE.** waqf-001's three `sharePercent: 12.5`
+  /// values sum to 37.5, not 100; §08 treats 12.5 as a RELATIVE deed weight renormalised in-cohort.
+  /// Collapsing the two is how a 37.5%-of-distributable payout ships.
+  ///
+  /// Scale 18 matches `packages/domain`'s `MAX_WEIGHT_DECIMAL_PLACES`. A weight is NOT money, so
+  /// the `Decimal(18,2)` money convention does not apply to it.
+  ///
+  /// NULLABLE, and the mapper REFUSES a null rather than substituting one — a required column would
+  /// have forced this migration to INVENT a weight for every existing row, which is the same defect
+  /// from the other end.
+  stipulatedWeight      Decimal?           @db.Decimal(38, 18)
+  verificationStatus    VerificationStatus
+  /// Stale / PENDING / UNVERIFIED KYC blocks this beneficiary's distribution line
+  /// (share WITHHELD, never reallocated). Refresh interval lives in
+  /// `Setting['kyc.refreshIntervalMonths']`.
+  /// ⚠ unverified — confirm vs primary law
+  kycLastRefreshed      DateTime?
+  kycLastRefreshedHijri String?
+
+  // Beneficial-Ownership minimum dataset (BR-202/203). SENSITIVE PII — application-level
+  // field encryption (AES-256-GCM) on top of DB-at-rest encryption (§12).
+  // NAMING WART, deliberately kept from §07: the `...Enc` columns hold PLAINTEXT at the
+  // application boundary and CIPHERTEXT at rest. The `...Hmac` siblings are the
+  // searchable-hash columns (equality lookup without decrypt-to-search); a caller may never
+  // set them directly — the encryption extension derives them.
+  isUbo              Boolean         @default(false)
+  uboIdTypeEnc       String?
+  uboIdNumberEnc     String?
+  uboIdNumberHmac    String?
+  uboBankingRefEnc   String?
+  uboBankingRefHmac  String?
+  uboShareOfProceeds Decimal?        @db.Decimal(9, 4)
+  confidentiality    Confidentiality @default(SENSITIVE_PII)
+
+  payments        DistributionLineItem[]
+  documents       Document[]
+  /// Back-relation for the waqf-level مآل clause. A row here does NOT make this beneficiary the
+  /// ultimate taker by itself — the DEED clause on `Waqf` does, and it is never inferred (R7-c).
+  ultimateTakerOf WaqfReversionTaker[]   @relation("WaqfUltimateTaker")
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  deletedAt DateTime?
+
+  /// NOT an optimisation — REQUIRED as the target of the two composite foreign keys above
+  /// (`Beneficiary.parent` and `WaqfReversionTaker.beneficiary`), which is what makes a
+  /// cross-endowment parent edge and a cross-endowment ultimate taker structurally impossible.
+  @@unique([waqfId, id])
+  @@index([waqfId])
+  @@index([uboIdNumberHmac])
+  @@index([uboBankingRefHmac])
+  /// ⚠ **KEPT, NOT DROPPED** (S4/E3). The hot entitlement query became an ANCESTOR WALK, so the
+  /// walk's join key is what needed adding — but this index still serves the `ORDERED` tier query
+  /// (which R6 did not change) and the ṭabaqa-vs-derived-depth cross-check aggregate, and dropping a
+  /// live index to chase a walk that has never been benchmarked is a guess.
+  @@index([waqfId, tabaqa])
+  /// The recursive CTE's join key: `child.[waqfId, parentId] -> parent.[waqfId, id]`.
+  /// ⚠ STATED HONESTLY: **no measurement exists for either index on this schema.** The
+  /// recommendation is "add the walk's key, keep the tier key", and neither is measured.
+  @@index([waqfId, parentId])
+  @@map("beneficiary")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 6. FINANCIAL CORE (§07 §6)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Dedicated per endowment — NO COMMINGLING, zero tolerance (BR-501).
+/// A `Transaction` may only post to a `BankAccount` whose `waqfId` matches the transaction's
+/// `waqfId` and whose `isDedicated = true`; any other posting is rejected and audited.
+model BankAccount {
+  id          String  @id @default(cuid())
+  waqfId      String
+  waqf        Waqf    @relation(fields: [waqfId], references: [id])
+  /// Plaintext human label for the account (not the IBAN).
+  accountRef  String
+  /// Plaintext at the app boundary, ciphertext at rest (see Beneficiary note).
+  ibanEnc     String
+  /// Searchable HMAC of the IBAN — derived by the encryption extension, never set by a caller.
+  ibanHmac    String
+  /// Arabic-authoritative (NFR-01)
+  bankNameAr  String
+  purpose     String
+  currency    String  @default("SAR")
+  isDedicated Boolean @default(true)
+
+  transactions Transaction[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  deletedAt DateTime?
+
+  @@unique([ibanHmac])
+  /// FK TARGET for the anti-commingling composite key (migration 19 §1). `id` is already unique,
+  /// so this adds no constraint the data did not satisfy — it exists so Postgres will ACCEPT
+  /// `transaction (waqfId, bankAccountId) -> bank_account (waqfId, id)`.
+  @@unique([waqfId, id], name: "bank_account_waqfId_id_key")
+  @@index([waqfId])
+  @@map("bank_account")
+}
+
+/// Revenue + Expense unified; recorded IN ARABIC (BR-502).
+///
+/// ┌─ BINDING RULE 1 — CORPUS / INCOME SEGREGATION ─────────────────────────────────────┐
+/// │ `asl` (أصل, corpus) and `ghallah` (غلة, income) are distinct and are never mixed.    │
+/// │ EVERY receipt is classified income-vs-capital AT ENTRY (`receiptClass`).             │
+/// │ CAPITAL receipts — explicitly SALE PROCEEDS and ISTIBDAL (substitution) PROCEEDS —   │
+/// │ are corpus and are BLOCKED from the distribution waterfall; they flow back into      │
+/// │ corpus. The waterfall's ONLY legal input is `type = REVENUE AND receiptClass =       │
+/// │ INCOME` — served by the composite index below. A non-diminution-of-corpus invariant  │
+/// │ always holds: no operation may distribute, erode, or reclassify corpus as income.    │
+/// │                                                                                      │
+/// │ The columns are nullable because an EXPENSE is an outflow and is neither ghallah nor │
+/// │ aṣl inflow; NOT NULL would force a meaningless value on half the table. Conditional  │
+/// │ DB CHECKs in the hand-written constraints migration express exactly                  │
+/// │ "required for REVENUE, forbidden for EXPENSE":                                       │
+/// │   transaction_revenue_requires_receipt_class · transaction_expense_has_no_receipt_class│
+/// │   transaction_expense_requires_category · transaction_capital_requires_source        │
+/// │   transaction_income_has_no_capital_source · transaction_capital_other_requires_note │
+/// │   transaction_amount_nonnegative                                                     │
+/// │                                                                                      │
+/// │ TODO(surface): FIQH — the STRUCTURE above is a safe invariant, but the per-receipt-  │
+/// │ type CLASSIFICATION RULES are not settled and are NOT resolved here. The ADR asserts │
+/// │ rent = income and sale/istibdal/expropriation proceeds = capital, but the Sharia     │
+/// │ review is recorded as UNSIGNED. Unanswered: lease premium / key money; insurance      │
+/// │ proceeds for a destroyed building; rent arrears collected after an istibdal (old      │
+/// │ corpus or new?); whether a ṣiyāna reserve funded from income becomes corpus once      │
+/// │ accumulated; whether a CAPITAL receipt should even be a `Transaction` row or a        │
+/// │ separate `CorpusMovement` entity.                                                     │
+/// └──────────────────────────────────────────────────────────────────────────────────────┘
+model Transaction {
+  id                  String           @id @default(cuid())
+  waqfId              String
+  waqf                Waqf             @relation(fields: [waqfId], references: [id])
+  type                TxnType
+  /// SOCPA-aligned chart-of-accounts code.
+  /// TODO(surface): SCOPE — the operational per-endowment/per-property COA (with explicit
+  /// corpus/income account classes, per the ledger ADR) is NOT built in S1; until E5/S6 this
+  /// column temporarily carries the raw source/category string.
+  category            String
+  expenseCategory     ExpenseCategory?
+  /// Income-vs-capital classification, assigned at entry. See the block comment above.
+  receiptClass        ReceiptClass?
+  capitalSource       CapitalSource?
+  /// Arabic-authoritative justification, required when `capitalSource = OTHER`.
+  capitalSourceNoteAr String?
+  /// Arabic-authoritative, REQUIRED (NFR-01 / BR-502)
+  descriptionAr       String
+  descriptionEn       String?
+  amountSar           Decimal          @db.Decimal(18, 2)
+  date                DateTime
+  dateHijri           String
+  bankAccountId       String
+  bankAccount         BankAccount      @relation(fields: [bankAccountId], references: [id])
+  assetId             String?
+  asset               Asset?           @relation(fields: [assetId], references: [id])
+  /// The bank's own reference for this movement — the reconciliation's ONLY matching key
+  /// (migration 20 §1). `null` means NOBODY HAS RECORDED ONE, never "look it up by amount": an
+  /// unreferenced entry is reported `UNREFERENCED`, which is a piece of work, not an error.
+  /// ⚠ Deliberately NOT unique — two entries claiming one reference is a reportable finding
+  /// (`DUPLICATE_LEDGER_REFERENCE`), and a unique index would turn it into an insert failure at
+  /// capture time, which is how a bookkeeper learns to leave the field blank.
+  bankReference       String?
+  reconciledAt        DateTime?
+
+  /// ── THE SUPERSEDING-RECORD LINKS (owner ruling Q-E5-1(b), 2026-08-18; migration 20 §3) ──────
+  /// A mis-classified receipt is corrected by TWO NEW ROWS, never by an edit: a `reversal` that
+  /// MIRRORS the original exactly (enforced by `transaction_correction_shape`), and a re-entry
+  /// carrying the corrected class. The original is untouched and still says what it said.
+  /// ⚠ The pair nets to zero by EXCLUSION, not by arithmetic — `transaction_amount_nonnegative`
+  /// holds and the sign is carried by `type`, so a negative contra-entry is unrepresentable.
+  /// ⚠ THAT EXCLUSION IS A QUERY CONTRACT, NOT A CONSTRAINT: every consumer of the ledger must
+  /// drop a reversed original AND its reversal.
+  /// ⚠ THE NEXT SENTENCE USED TO READ *"`@qmulate/domain/ledger` ships the predicate; E6 owes using
+  /// it"* AND THAT WAS FALSE WHEN WRITTEN. MEASURED: `packages/domain/src/ledger/index.ts` exports
+  /// nothing matching `/revers/i`. E6 wrote the predicate instead, as `excludeReversedPairs` in
+  /// `packages/api/src/distribution/input.ts`, whose own header reported this claim as false and
+  /// could not fix it from there. `@qmulate/domain/ledger` is still the right home and the move is
+  /// still owed — together with refactoring `finance.reconcile`'s inline `where` onto it — but a
+  /// comment promising a control nothing implements is the defect class this repo has a name for,
+  /// so it is corrected here rather than left standing for a fourth sprint.
+  reversalOfId                String?
+  reversalOf                  Transaction?  @relation("TransactionReversal", fields: [reversalOfId], references: [id])
+  reversedBy                  Transaction[] @relation("TransactionReversal")
+  correctionOfId              String?
+  correctionOf                Transaction?  @relation("TransactionCorrection", fields: [correctionOfId], references: [id])
+  corrections                 Transaction[] @relation("TransactionCorrection")
+  /// The APPROVED `RESERVED_MATTER` (kind `RECEIPT_CLASS_CORRECTION`) that authorised the pair.
+  correctionApprovalRequestId String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  /// ⚠ RETIRING A LEDGER ROW IS A RESERVED MATTER — BOTH DIRECTIONS, AND ON THE BIRTH TOO
+  /// (`transaction_row_retirement`, migration 25; PRODUCT OWNER, 2026-08-20, S4 memo "S7 · AV7-F4").
+  /// Setting, clearing or re-dating this column, and INSERTing a row with it already set, each
+  /// require an APPROVED, maker <> checker `RESERVED_MATTER` naming `transaction:<id>:deletedAt`.
+  /// UNIFORM for income and capital — the class difference is in the refusal's stated REASON, never
+  /// in its strictness — because anything that changes what is distributable gets the gate
+  /// (the same logic as Q-E5-1's reclassification gate).
+  /// ⚠ MEASURED before that guard, `qmulate_app`, no approval: one `SET "deletedAt" = now()` took a
+  /// run's `capitalReceiptsSar` from 4,200,000.00 to 0.00, dropped `CAPITAL_RECEIPTS_EXCLUDED`,
+  /// emptied `excludedCapitalReceipts` and left NO diagnostic and NO trace step — the corpus went
+  /// INVISIBLE rather than visibly excluded (AV7-F4). And `INSERT … "deletedAt" = now()` committed
+  /// too: SAR 9,000,000 of istibdal proceeds in the ledger and in no register.
+  /// ⚠ AND THIS IS NOT THE CORRECTION PATH. A wrong receipt is corrected by the superseding pair
+  /// above (`reversalOfId` / re-entry), which stays VISIBLE. A retirement is a different act, and
+  /// `ledgerWindowWhere` no longer filters this column, so a retired row inside a period HALTS the
+  /// distribution run by name (`LEDGER_ROW_SOFT_DELETED`) instead of vanishing from it.
+  /// ⚠ OWED, and reported rather than improvised: there is no soft-delete PROCEDURE and no
+  /// `ReservedMatterKind` naming a retirement, so a request must borrow a kind or carry none.
+  /// Whoever builds that procedure owes the kind AND its ar/en copy (product-approved text).
+  deletedAt DateTime?
+
+  @@index([waqfId, date])
+  /// The "income-only waterfall" index — the distribution engine's sole legal input set.
+  ///
+  /// ⚠⚠ **NOTHING ON THIS TABLE RECORDS THAT A RECEIPT HAS ALREADY BEEN DISTRIBUTED — AND SINCE
+  /// MIGRATION 26 THAT IS A QUERYABILITY GAP, NOT A CONTROL GAP.**
+  /// There is no link to a `Distribution` and no consumed-by-a-run marker: 24 columns, 7 foreign
+  /// keys (waqf, bank_account ×2, asset ×2, transaction ×2), not one of them naming a run —
+  /// asserted from `information_schema` / `pg_constraint` in
+  /// `test/distribution-run-schema.integration.test.ts` §6, so the absence is a recorded decision
+  /// rather than something a reader has to grep for.
+  ///
+  /// ⊕ **WHY IT IS NO LONGER A CONTROL (AV7-F2 closed 2026-08-20).** This note used to say that
+  /// *"even NON-OVERLAPPING consecutive runs rely entirely on the caller choosing disjoint windows"*
+  /// and that a period constraint *"does NOT close this"*. **That was wrong, and the argument is
+  /// worth keeping because the correction is not obvious:** a run's receipts are the ledger rows
+  /// inside `[periodStart, periodEnd + 1 day)`; `create` writes the period COLUMNS and the stored
+  /// input from the SAME argument; `computationTrace` is WRITE-ONCE (migration 22 §1); and `execute`
+  /// pays from a REPLAY of that stored input rather than re-reading the ledger (AV7-E's fix, step
+  /// 8). So if two paid runs' intervals are DISJOINT, **no receipt can be in both** — and
+  /// `distribution_paid_periods_disjoint` makes overlapping paid intervals unrepresentable, using
+  /// the same `[start, end+1)` interval the ledger query uses. Double payment of one receipt is
+  /// structurally closed.
+  ///
+  /// What remains is the QUESTION THE MARKER WOULD ANSWER: *"which run paid this rent?"* — today
+  /// answerable only by reading the paying run's own `computationTrace.input`, which is write-once
+  /// but not queryable. Still owed, no longer load-bearing. ⚠ And the measurement that limits it
+  /// stands: `dist-001`'s trace carries `derivation,fixtureTotalSar,note,origin` and **no `input`**,
+  /// so a marker back-filled from stored inputs would be blind to the one historical payment in the
+  /// fixture. The candidate shape is a write-once `consumedByDistributionId`, composite-FK'd
+  /// `(waqfId, consumedByDistributionId)` so a receipt cannot be consumed by another endowment's run
+  /// (migration 19's pattern).
+  @@index([waqfId, type, receiptClass, date])
+  @@index([bankAccountId])
+  @@index([assetId])
+  @@map("transaction")
+}
+
+/// Estimates; class-gated (Large/Medium) — BR-504.
+model Budget {
+  id              String    @id @default(cuid())
+  waqfId          String
+  waqf            Waqf      @relation(fields: [waqfId], references: [id])
+  fiscalYear      String
+  revenueEstimate Decimal   @db.Decimal(18, 2)
+  expenseEstimate Decimal   @db.Decimal(18, 2)
+  approvedAt      DateTime?
+  approvedAtHijri String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  deletedAt DateTime?
+
+  @@unique([waqfId, fiscalYear])
+  @@index([waqfId])
+  @@map("budget")
+}
+
+/// QMULATE's trustee fee — set by the DEED, not by statute (BR-507, Nazarah Art. 11).
+///
+/// TWO "10%"s THAT MUST NEVER BE CONFLATED:
+///   • THIS record is the deed-set trustee fee. This engagement's deed sets 10% of REVENUE
+///     (customary ʿushr / عُشر), deducted before distribution. The basis is CONFIGURABLE
+///     because the next deed may differ — defaults live in `Setting`.
+///   • The Awqaf Law Art. 14 <= 10% of NET INCOME fee is the AUTHORITY's own, separate fee
+///     on endowments not under its trusteeship — a different payee, base, and instrument.
+///     It is seeded as `Setting['authorityFee.maxPercentOfNetIncome']`, never here.
+/// ⚠ unverified — confirm vs primary law
+model NazirFee {
+  id                         String   @id @default(cuid())
+  waqfId                     String
+  waqf                       Waqf     @relation(fields: [waqfId], references: [id])
+  basis                      FeeBasis @default(PERCENT_OF_REVENUE)
+  /// ⚠ unverified — confirm vs primary law (deed-set; 10.000 = ʿushr on this engagement)
+  percent                    Decimal? @db.Decimal(6, 3)
+  amountSar                  Decimal  @db.Decimal(18, 2)
+  periodEnd                  DateTime
+  periodEndHijri             String
+  deductedBeforeDistribution Boolean  @default(true)
+  invoiceRef                 String?
+  sourceNote                 String
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  deletedAt DateTime?
+
+  @@index([waqfId, periodEnd])
+  @@map("nazir_fee")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 7. DISTRIBUTIONS (§07 §7) — ghallah (income) only
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A ghallah (غلة, income) payout run.
+///
+/// WATERFALL ORDER IS STRICT: ṣiyāna (maintenance) reserved FIRST → operating → Nazir fee →
+/// distributable. Corpus is NEVER distributed (Binding rule 1): the run's only legal input is
+/// `Transaction.type = REVENUE AND receiptClass = INCOME`.
+///
+/// The engine HALTS with `SHART_INCOMPLETE` rather than guessing the founder's intent.
+/// A DIRECT_UTILIZATION waqf produces a Distribution with `distributableSar = 0` and no
+/// monetary line items.
+///
+/// MONEY CONSERVATION (§08 invariant I1) is an ENGINE invariant, deliberately NOT a DB CHECK:
+///   reserve + operating + nazirFee + Σ(paid) + Σ(withheld) == grossRevenue, no negatives.
+/// A CHECK would make the historical fixture record unseedable — see `computationTrace`.
+///
+/// Distribution timing default (3 months post-FY-end where no schedule is stipulated) lives in
+/// `Setting['deadline.DISTRIBUTE_3M_FYE.months']`.
+/// ⚠ unverified — confirm vs primary law
+model Distribution {
+  id                String             @id @default(cuid())
+  waqfId            String
+  waqf              Waqf               @relation(fields: [waqfId], references: [id])
+  periodStart       DateTime
+  periodStartHijri  String
+  periodEnd         DateTime
+  periodEndHijri    String
+  grossRevenueSar   Decimal            @db.Decimal(18, 2)
+  /// ṣiyāna (صيانة) — maintenance reserved FIRST, before operating, fee, or distribution.
+  reserveSar        Decimal            @db.Decimal(18, 2)
+  operatingSar      Decimal            @db.Decimal(18, 2)
+  nazirFeeSar       Decimal            @db.Decimal(18, 2)
+  distributableSar  Decimal            @db.Decimal(18, 2)
+  status            DistributionStatus
+  /// Maker-checker gate. Plain column (no FK) — an ApprovalRequest may outlive its subject.
+  ///
+  /// E2: CHECK `distribution_approved_requires_approval_request` makes `APPROVED`/`EXECUTED` with
+  /// a NULL approval unrepresentable, and TRIGGER `distribution_status_transition` guards the
+  /// lattice (APPROVED only from PENDING_APPROVAL, EXECUTED only from APPROVED, REJECTED-equivalent
+  /// CANCELLED and EXECUTED terminal). Sprint 1 allowed `status: 'EXECUTED'` with no approval at
+  /// all — ZERO authority, which is worse than a second one: nothing to attribute, nothing to
+  /// audit, and the maker-checker invariant vacuously satisfied.
+  approvalRequestId String?
+  executedAt        DateTime?
+  executedAtHijri   String?
+  /// ⚠ ADDED IN E6/S7's MIGRATION 21 §1. **NO `@default`, EVER — that is the point of the column.**
+  ///
+  /// Which build of the pure engine produced this run. Today `e6-distribution/4.0.0`; it was bumped
+  /// from 3.0.0 on 2026-08-17 because owner memo Q5 changes the amounts a stored input produces (256
+  /// of 7,680 enumerated cells) and Q7 turns a computing run into a refusal — so a v3 run and a v4
+  /// run of ONE register are not comparable, and the version is a byte inside the digest a Nazir
+  /// signs. A `@default` would let the DATABASE assert "the current engine produced this" on behalf
+  /// of nobody; NULL means NOBODY RECORDED ONE, never "the current version".
+  ///
+  /// CHECK `distribution_engine_version_not_blank`: NULL is legal, `''` is not.
+  engineVersion     String?
+  /// ⚠ ADDED IN E6/S7's MIGRATION 21 §1. **NO `@default`.** THE ARTIFACT THE NAZIR SIGNS.
+  ///
+  /// Hex sha256 of the engine result's canonical form (`canonicalizeResult`,
+  /// `packages/domain/src/distribution/trace.ts`), computed in `packages/api` — the database neither
+  /// computes it nor opines on the algorithm, which is why there is no format CHECK: one would make
+  /// a hash-algorithm change a migration. The approval carries the same two facts inside its bound
+  /// payload (`payloadHash`); the run needs its own copy because an `ApprovalRequest` may outlive
+  /// its subject and `approvalRequestId` is not a foreign key.
+  ///
+  /// ⚠ **NO UNIQUE, DELIBERATELY.** Two runs of one register at one engine version SHOULD hash
+  /// identically — that is the reproducibility property. A unique index would make it an error.
+  ///
+  /// ⚠ **NEITHER COLUMN IS WRITE-ONCE YET, MEASURED.** `distribution_status_transition`'s STATUS
+  /// clauses fire only when the status changes, so `UPDATE … SET "runDigest" = …` on an EXECUTED run
+  /// commits (pinned in `test/distribution-run-schema.integration.test.ts` §5). Migration 21's header
+  /// records why the seal was held back (the write order was still being built) and what shape it
+  /// should take; the adversarial register tracks it as **AV7-AUD-F4**, still owed. The failure
+  /// direction is asymmetric and worth knowing: a moved `runDigest` makes `distribution.execute`
+  /// REFUSE (`ARTIFACT_DIGEST_MISMATCH`), so payment is fail-safe — what is exposed is the EVIDENCE
+  /// on a run that already paid. `computationTrace` below IS sealed as of migration 22 §1.
+  /// CHECK `distribution_run_digest_not_blank`: NULL is legal, `''` is not.
+  runDigest         String?
+  /// Per-beneficiary "why", reproducible for audit: cohort resolution, renormalization,
+  /// rounding remainders, advisory flags, and any recorded discrepancy.
+  ///
+  /// ⚠ STILL THE ONLY HOME for `flags`, `invariantsChecked`, `unverifiedNotes`, `entitlementRule`,
+  /// `timing.*`, the refusal discriminator, per-line gate flags and the BR-505 `LineBasis`. Migration
+  /// 21 did NOT invent columns for them: each has a PRODUCT half (which vocabulary, whose ar/en
+  /// copy, which figures are unverified) and a column would be an answer nobody has given.
+  ///
+  /// ⚠ **AND IT IS NOT A LOG — IT IS THE MONEY, SO MIGRATION 22 §1 MAKES IT WRITE-ONCE.**
+  /// `distribution.execute` reads the LINE SET out of this Json (every beneficiary, every status,
+  /// every halala) and writes `distribution_line_item` from it. Until migration 22 nothing guarded
+  /// it and no digest covered it: `execute` step 7 compares the approved payload to the `runDigest`
+  /// and `engineVersion` COLUMNS, and this was a third value the comparison never touched. MEASURED
+  /// (AV7-E/E2/E3): `jsonb_set(…, '{lines,0,entitledSar}', '"999999.00"')` after a genuine Nazir
+  /// approval posted paid lines of SAR 1,137,499.00 against a `distributableSar` of SAR 275,000.00,
+  /// an `EXCLUDED` line was flipped to `PAID`, and both writes succeeded on `qmulate_app` — the role
+  /// the API process itself holds. The seal is a clause inside
+  /// `qmulate_distribution_status_transition()`, AHEAD of its `new_status = old_status` early
+  /// return (that fast path was the hole), so the trigger census on this table is unchanged.
+  /// ⚠ It covers UPDATE and not INSERT, which is why `distribution.execute` ALSO re-derives the
+  /// digest by replaying `computationTrace.input` and refuses unless it reproduces `runDigest`
+  /// (`authorisedLines`, `packages/api/src/routers/distribution.ts`).
+  computationTrace  Json
+
+  lineItems DistributionLineItem[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  deletedAt DateTime?
+
+  /// FK TARGET (migration 19 §1): a line item's own `waqfId` must be its parent run's.
+  @@unique([waqfId, id], name: "distribution_waqfId_id_key")
+  @@index([waqfId, periodEnd])
+  /// ⚠ ONE MORE UNIQUE CONSTRAINT EXISTS ON THIS TABLE AND PRISMA CANNOT EXPRESS IT.
+  ///
+  /// Migration 21 §3 installs the PARTIAL unique index `distribution_one_live_run_per_period` on
+  /// `("waqfId","periodStart","periodEnd") WHERE "deletedAt" IS NULL AND "status" <> 'CANCELLED'`.
+  /// Prisma has no `where` on `@@unique`, so it is declared in SQL and recorded here — and it is
+  /// pinned by name, with both exclusions exercised, in
+  /// `test/distribution-run-schema.integration.test.ts`.
+  ///
+  /// Two live runs for one period are two answers to what the family is owed, picked between by
+  /// `ORDER BY` accident. PARTIAL because §08's correction path is a NEW run and the lattice retires
+  /// the old one as `CANCELLED` (there is no `REJECTED`): a TOTAL unique index would make the
+  /// correction path unrepresentable.
+  ///
+  /// ⚠ CONSEQUENCE FOR WRITERS AND TESTS: anything keyed on `(waqfId, period)` now collides on a
+  /// second attempt — including a Playwright spec that runs once per locale project against one
+  /// database. Nonce-derive the period.
+  ///
+  /// ⚠⚠ **THE INDEX IS ON THE EXACT TRIPLE, SO IT DOES NOT MEAN "ONE PERIOD'S GHALLAH IS PAID
+  /// ONCE" — AND THAT IS WHY `distribution_paid_periods_disjoint` EXISTS (AV7-F2, ✅ CLOSED
+  /// 2026-08-20, migration 26).**
+  /// MEASURED through the API (probe A-10, `packages/api/test/av7-corpus-wall.integration.test.ts`):
+  /// two windows ONE DAY APART — 2027-08-01…08-31 and 2027-08-02…08-31 — both live, both approved by
+  /// a real second Nazir, both `EXECUTED`. **SAR 820,000.00 recorded as owed against SAR 410,000.00
+  /// of ghallah from one SAR 500,000 receipt.** Those two triples differ, so this index saw nothing,
+  /// and neither did the engine: each run is INDIVIDUALLY CORRECT. The excess has no income
+  /// provenance, so it is asl by the engine's own definition (Binding rule 1).
+  ///
+  /// The guard is `EXCLUDE USING gist ("waqfId" WITH =, daterange("periodStart"::date,
+  /// "periodEnd"::date, '[]') WITH &&) WHERE ("status" = 'EXECUTED')`.
+  /// ⚠ **A CONSTRAINT AND NOT A TRIGGER, WHICH IS THE ONE PLACE THIS SCHEMA'S USUAL ANSWER IS
+  /// WRONG:** a trigger would have to READ before it WROTE — TOCTOU by construction, AV7-B's exact
+  /// shape — and there is no row to lock, because the conflict is between two rows that do not exist
+  /// yet. An `EXCLUDE` index entry IS the mutual exclusion. The cost is that a `23P01` cannot carry
+  /// a remedy sentence the way every `qmulate_*` trigger does, so the explanation lives in migration
+  /// 26's header and the refusal is surfaced by the procedure.
+  /// ⚠ **`'[]'` IS LOAD-BEARING:** it normalises to `[start, end+1)`, byte-for-byte the interval
+  /// `periodWindow()` gives the run's own ledger query — which is what makes this SUFFICIENT rather
+  /// than a narrowing of A-10's shape: `create` writes the period columns and the stored input from
+  /// ONE argument, `computationTrace` is write-once (migration 22 §1), and `execute` pays from a
+  /// REPLAY of that input, so disjoint periods make one receipt in two paid runs impossible.
+  /// ⚠ **AND THE PREDICATE OMITS `deletedAt` DELIBERATELY.** With it, one ungoverned
+  /// `UPDATE "distribution" SET "deletedAt" = now()` on a PAID run frees its period to be paid again
+  /// — a paid run going INVISIBLE instead of visibly PAID, which is AV7-F4's failure mode rebuilt in
+  /// a new constraint. Nothing gates `distribution."deletedAt"` (migration 25 gated `transaction`).
+  /// Retiring a paid run does not un-pay a beneficiary; the line items are still there.
+  /// ⚠ `EXECUTED` rather than `<> 'CANCELLED'` is safe only because **`EXECUTED` IS TERMINAL** —
+  /// `qmulate_distribution_status_transition()` refuses any move out of it, so the pay-cancel-rerun
+  /// escape does not exist. Verified, not assumed.
+  ///
+  /// ⊕ **WHAT IT COST, AND THE COST WAS THE FINDING.** Installing it turned **25 of 620
+  /// `@qmulate/api` tests red across 5 files**, every one a `23P01` and every one a TRUE POSITIVE:
+  /// `waqf-001` has exactly ONE income receipt in the whole fixture (`rev-001`) and the seeded
+  /// `dist-001` had already paid the quarter containing it, so four suites pinned `periodEnd` to
+  /// `2026-03-31` and varied only the START DAY — in their own headers, *"so the ledger window's
+  /// CONTENTS do not change"*. **The test suite was exercising AV7-F2 on every run, and the suites
+  /// asserting the lifecycle worked were the same shape as the attack.** The guard therefore landed
+  /// with a test round: `paidPeriod()` in `packages/api/test/setup.ts` allocates provably disjoint
+  /// windows inside the band the seeded holiday calendar can actually compute, and `bookIncome()`
+  /// gives each its own pool and REFUSES if the window holds anything else.
+  @@map("distribution")
+}
+
+/// One beneficiary's line in a distribution run.
+/// Append-only in practice — a correction is a new run, so there is no `deletedAt`/`updatedAt`.
+/// A WITHHELD share is never reallocated to other beneficiaries.
+model DistributionLineItem {
+  id             String                 @id @default(cuid())
+  /// ⚠ ADDED IN E5's MIGRATION 19 §2, AND IT IS A GUARD, NOT A CONVENIENCE.
+  ///
+  /// This table had NO endowment column: it reached the endowment only through `distributionId`.
+  /// So nothing could compare the paying run's endowment with the paid beneficiary's, and a line
+  /// on waqf-001's run paying a waqf-002 beneficiary COMMITTED (measured). Two composite FKs now
+  /// tie all three ids together: `(waqfId, distributionId)` to the run and `(waqfId, beneficiaryId)`
+  /// to the beneficiary. Backfilled from the parent run, then NOT NULL — never defaulted.
+  waqfId         String
+  distributionId String
+  distribution   Distribution           @relation(fields: [distributionId], references: [id])
+  beneficiaryId  String
+  beneficiary    Beneficiary            @relation(fields: [beneficiaryId], references: [id])
+  status         DistributionLineStatus @default(PAID)
+  /// ⚠ WIDENED FROM `Decimal(9,4)` IN E6/S7's MIGRATION 21 §2, BECAUSE PERSISTENCE WAS ROUNDING THE
+  /// STATEMENT FIGURE AWAY.
+  ///
+  /// The engine prints this at a FIXED six decimals — `SHARE_PERCENT_SCALE = 6`, and
+  /// `sharePercentOf()` returns `toFixed(6, ROUND_HALF_UP)` — so at scale 4 the last two digits were
+  /// dropped on the way into the database. MEASURED in Postgres: `33.333333` stored as `'33.3333'`
+  /// at `(9,4)` and as `'33.333333'` at `(9,6)`; the two seeded lines still read `12.5000` before
+  /// the migration. No halala ever moved (the money is allocated in integer halalas by largest
+  /// remainder and this figure is display-only, never a base) — what broke was the STATEMENT: the
+  /// percentage a beneficiary reads stopped matching the run's own trace at the 5th decimal.
+  ///
+  /// Total digits stay 9, so the widening SPENDS two integer digits — `(9,4)` allowed 99999.9999,
+  /// `(9,6)` allows 999.999999. A share is 0…100 by construction, and migration 21 §0b pre-flights
+  /// that trade by naming any row ≥ 1000 instead of dying on a bare `22003 numeric field overflow`.
+  sharePercent   Decimal                @db.Decimal(9, 6)
+  amountSar      Decimal                @db.Decimal(18, 2)
+  /// TODO(surface): SCOPE — §12 names "distribution payout references" as a field-encryption
+  /// target while §07 models this as plaintext. Kept plaintext for S1 (no real payout ref
+  /// exists yet); recommend renaming to `transferRefEnc` in E6/S7 — cheap now, a data
+  /// migration later.
+  transferRef    String?
+  /// STALE_KYC | UNVERIFIED | CATEGORY_NOT_CAPTURED | CROSS_BORDER_PENDING | …
+  blockedReason  String?
+
+  createdAt DateTime @default(now())
+  createdBy String?
+
+  @@index([distributionId])
+  @@index([beneficiaryId])
+  @@index([waqfId])
+  @@map("distribution_line_item")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 8. COMPLIANCE, FILINGS, DEADLINES (§07 §8)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// TEMPLATE — seeded from unified-framework §1/§2/§3. Global (not waqf-scoped).
+model ComplianceObligation {
+  id              String             @id @default(cuid())
+  /// e.g. "GL-3-1-register-30bd"
+  ///
+  /// ⚠ NO LONGER UNIQUE ON ITS OWN (S8-Q5, migration 31). A template is immutable WITHIN a library
+  /// version, so publishing a correction means a NEW ROW with the same `code` and a new
+  /// `libraryVersion` — which `UNIQUE (code)` made impossible to store.
+  code            String
+  section         ComplianceSection
+  /// Arabic-authoritative (NFR-01)
+  workstreamAr    String
+  workstreamEn    String
+  titleAr         String
+  titleEn         String
+  /// Which endowment classes this applies to.
+  /// ⚠ unverified — confirm vs primary law
+  gate            ClassificationGate
+  /// Links to a configurable deadline rule (§09 rule codes). The WINDOW itself is never
+  /// stored here — it resolves from `Setting['deadline.<ruleKey>.businessDays' | '.months']`.
+  /// ⚠ unverified — confirm vs primary law
+  deadlineRuleKey String?
+
+  /// The library release this row belongs to. Templates are IMMUTABLE within a version (§09 Engine A;
+  /// product owner S8-Q5, 2026-08-23) — `compliance_obligation_template_immutable` refuses every
+  /// content change, so a correction is a new row, never an edit.
+  ///
+  /// The ten rows derived backwards from fixture task instances carry `'fixture-derived'`, which reads
+  /// as what they are: placeholders, not a published library. The canonical §09 library
+  /// (`packages/domain/src/compliance/catalogue.ts`, version `2026-08-20.1`) arrives ALONGSIDE them.
+  libraryVersion String
+
+  /// ⊕ S8-Q1 (product owner, 2026-08-23): "Compartment the row." The GOV-AML-02 obligation — report
+  /// AML/CTF suspicion to the FIU — and its task instances are visible ONLY inside the AML
+  /// compartment. The general register shows nothing AML-attributable.
+  ///
+  /// ⚠ THIS DEPARTS FROM §09's LITERAL TEXT, which puts GOV-AML-02 on the general register at gate
+  /// `all`. That is now the drifted side: a task moving `NOT_STARTED -> COMPLETED` is an
+  /// AML-attributable state change visible to every holder of `compliance:task:read` — measured at
+  /// ELEVEN of thirteen presets — while `aml_officer` holds no compliance permission at all. "The AML
+  /// report task was completed on 12 Rajab" is the tip-off, written by the compliance board rather
+  /// than by a notification. §09 owes a supersession note citing the ruling.
+  ///
+  /// The column is spelled `confidentiality Confidentiality` for the reason `aml_report`'s is: the
+  /// NAME is the control. `deriveClassification()` reads it, `amlClause()` filters on it, and the
+  /// both-directions parity test keys on this exact spelling.
+  ///
+  /// ⊕ FROZEN SINCE MIGRATION 33. It is TEMPLATE CONTENT by S8-Q5's own definition, and
+  /// `compliance_obligation_template_immutable` refuses to change it in place. Measured before the
+  /// fix, as `qmulate_app`: `SET "confidentiality" = 'NORMAL'` on the seeded `GOV-AML-02` row
+  /// COMMITTED while `SET "titleEn"` was refused 42501 — the compartment could be lifted off the duty
+  /// to report with one UPDATE, no version bump, no approval and no error. The gap was unobservable
+  /// until the canonical library was seeded, because migration 32 marked no row.
+  confidentiality Confidentiality @default(NORMAL)
+
+  tasks ComplianceTask[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  deletedAt DateTime?
+
+  /// The versioned key. `UNIQUE (code)` alone made §09's "publish a new version" unfollowable.
+  @@unique([code, libraryVersion])
+  @@map("compliance_obligation")
+}
+
+/// INSTANCE per endowment.
+model ComplianceTask {
+  id              String               @id @default(cuid())
+  waqfId          String
+  waqf            Waqf                 @relation(fields: [waqfId], references: [id])
+  obligationId    String
+  obligation      ComplianceObligation @relation(fields: [obligationId], references: [id])
+  /// FROZEN SNAPSHOT of the template this task was instantiated from (§09 Engine A; S8-Q5).
+  ///
+  /// ⚠ The FK above names a ROW, and before migration 31 a row's content was mutable — so a later
+  /// edit to the catalogue rewrote what every task pointing at it recorded. These two columns carry
+  /// the IDENTITY of the duty instead, and `compliance_task_snapshot_frozen` refuses any change to
+  /// them: a snapshot that can be updated is not a snapshot.
+  templateCode    String
+  templateVersion String
+  /// ⊕ S8-Q1 — the task instance carries its OWN classification rather than inheriting the
+  /// obligation's through a join, for the reason `aml_follow_up` does: a row whose visibility depends
+  /// on a join is a row one `include` away from being readable, and the nested-`include` bypass of
+  /// `amlClause` is a RECORDED gap in `SCOPING_KNOWN_GAPS`, not a closed one.
+  confidentiality Confidentiality      @default(NORMAL)
+  status          ComplianceTaskStatus
+  owner           String?
+  startDate       DateTime?
+  startDateHijri  String?
+  closeDate       DateTime?
+  closeDateHijri  String?
+  notes           String?
+
+  /// ⊕ E7-completion (§09 Engine A) — the INSTANTIATION IDENTITY: which class this task was
+  /// materialised under, and why the row exists. Set ONCE by the engine at creation and frozen by
+  /// `compliance_task_instantiation_identity_frozen` (migration 36) — a task whose provenance can
+  /// be rewritten is evidence of nothing. ⚠ NULLABLE because the ten fixture rows predate the
+  /// engine and were hand-seeded, not instantiated: a NULL here reads "pre-engine row", and
+  /// migration 36 refuses to backfill it — fabricating an instantiation occasion for a row that
+  /// never had one is the same falsified-history shape as un-retiring.
+  classificationAtInstantiation WaqfClassification?
+  instantiatedReason            TaskInstantiationReason?
+  /// S9-3b's EVIDENCE POINTER: which LIBRARY_UPGRADE approval THIS task's attachment rests on.
+  /// CHECK (migration 39): present iff `instantiatedReason = LIBRARY_UPGRADE`, both directions;
+  /// frozen with the instantiation identity (re-pointing rewrites which authority the duty
+  /// rests on — migration 35's re-point lesson). Plain column, not an FK — the approval row's
+  /// own guards keep it; the task must not follow a soft-deleted approval into invisibility.
+  instantiatedByApprovalId      String?
+
+  /// §09: "a task that stops applying is set to `retired` … never removed", with the reason
+  /// recorded and the row kept as history (A3/A5). `RETIRED` is TERMINAL and these two columns are
+  /// write-once-with-the-transition, which must carry BOTH — all enforced by
+  /// `compliance_task_retirement_terminal` (migration 36). The table CHECK is deliberately
+  /// one-directional (facts ⇒ RETIRED, both-or-neither): a PRE-ENGINE row retired before these
+  /// columns existed legally carries neither, and a CHECK demanding them would have refused the
+  /// migration on any database holding one.
+  retiredReason String?
+  retiredAt     DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  deletedAt DateTime?
+
+  @@index([waqfId, status])
+  @@index([obligationId])
+  @@map("compliance_task")
+}
+
+/// MANUAL status fields — NOT integrations (BR-603). No public APIs are evidenced.
+model GovernmentFiling {
+  id                String             @id @default(cuid())
+  waqfId            String
+  waqf              Waqf               @relation(fields: [waqfId], references: [id])
+  platform          GovernmentPlatform
+  /// ⊕ S8-Q6 (owner, 2026-08-23): the transition INTO `SUBMITTED` needs an APPROVED maker≠checker
+  /// `GOVT_FILING` approval naming THIS row — G-3's "filings cannot be self-approved", enforced by
+  /// `government_filing_submission_authority` (migration 35). Every other status is manual
+  /// bookkeeping (BR-603) and stays ungated: ACCEPTED/REJECTED record the AUTHORITY's decision.
+  status            FilingStatus
+  /// The authority for the CURRENT submission. Text, not an FK — the trigger is the verifier
+  /// (the distribution table's own precedent). May change ONLY in the statement that submits.
+  approvalRequestId String?
+  lastUpdated       DateTime?
+  lastUpdatedHijri  String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  deletedAt DateTime?
+
+  @@unique([waqfId, platform])
+  @@index([waqfId])
+  @@map("government_filing")
+}
+
+/// Computed by the deadline engine (BR-1001) over the KSA business-day calendar.
+/// §09 Engine B's FROZEN deadline row (migration 38, S9-2). The computed identity (rule, anchor,
+/// due date, actionable date, window snapshot, lineage) is frozen once written — `ENABLE ALWAYS`
+/// trigger `deadline_frozen_identity`, NULL included — because a displayed, possibly FILED date
+/// must not shift when a calendar or library changes. A correction is a NEW row linking
+/// `recomputedFromId` (UNIQUE — the lineage is a chain), never an edit. Lifecycle facts
+/// (satisfied/waived) are write-once; met ∧ waived is unrepresentable at rest
+/// (`deadline_state_coherent` — the same contradiction the domain deriver refuses as
+/// `DEADLINE_STATE_INCOHERENT`); DELETE/TRUNCATE are refused (retention posture, ⚠ unverified).
+/// ⚠ NO status column, deliberately: §09 — "State is derived, not stored as truth"; the daily
+/// evaluator mirrors state onto the bound `ComplianceTask.status`.
+model Deadline {
+  id                  String    @id @default(cuid())
+  waqfId              String
+  waqf                Waqf      @relation(fields: [waqfId], references: [id])
+  /// Plain column, not an FK — a deadline may outlive or precede its task instance.
+  complianceTaskId    String?
+  /// §09 rule vocabulary: REGISTER_30BD | UPDATE_15BD | ISTIBDAL_10BD | DISTRIBUTE_3M_FYE |
+  /// KYC_REFRESH | LICENSE_RENEWAL | CONTRACT_RENEWAL | HEARING | RETENTION_10Y.
+  /// The WINDOW LENGTH is never hard-coded — it resolves from `Setting`.
+  /// ⚠ unverified — confirm vs primary law
+  ruleKey             String
+  anchorDate          DateTime
+  anchorDateHijri     String
+  dueDate             DateTime
+  dueDateHijri        String
+  /// The window AS APPLIED (basis, amount, month anchor, the `Setting` key it resolved from, its
+  /// ⚠ unverified flag, the roll) — §09's "snapshot of the window actually applied, so a later
+  /// Setting change never silently rewrites history". Demanded on every engine-era INSERT
+  /// (`deadline_insert_provenance`); nullable only for the hypothetical pre-engine shape.
+  windowSnapshot      Json?
+  /// The act-by date for pre-expiry rules (expiry − lead business days), with its frozen twin.
+  actionableDate      DateTime?
+  actionableDateHijri String?
+  /// ⚠ LEGACY-NARROW (fits three of the nine rules); superseded by `windowSnapshot`. Kept
+  /// nullable so pre-engine rows keep their record; new writes record the snapshot instead.
+  businessDaysUsed    Int?
+  satisfiedAt         DateTime?
+  /// Evidence link for the met fact (CHECK: only beside `satisfiedAt`). Plain column, not an FK.
+  satisfiedEvidenceId String?
+  /// ⊕ S11-2 — HOW the duty was discharged; `MET` exactly when `satisfiedAt` is set (CHECKs
+  /// `deadline_discharge_kind_pairs_with_met` + `deadline_discharge_met_means_satisfied`). Write-once.
+  /// The seam for a future NOT-APPLICABLE state (counsel question open, memo S11 second batch).
+  dischargeKind       DeadlineDischargeKind?
+  /// The waiver pair (CHECK: travel together; never beside `satisfiedAt`). Write-once.
+  waivedAt            DateTime?
+  waivedReason        String?
+  escalatedAt         DateTime?
+  /// §09's ONLY recompute path: a corrected deadline is a NEW row linking its predecessor.
+  /// UNIQUE — two "current" corrections of one deadline would both claim to be the date on file.
+  recomputedFromId    String?   @unique
+  recomputedFrom      Deadline? @relation("DeadlineRecompute", fields: [recomputedFromId], references: [id])
+  recomputedTo        Deadline? @relation("DeadlineRecompute")
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  deletedAt DateTime?
+
+  @@index([waqfId, dueDate])
+  @@index([ruleKey])
+  @@index([complianceTaskId])
+  @@map("deadline")
+}
+
+/// §09 Engine B's MATERIAL-CHANGE CHANGE-SET — the recorded causes behind an open 15-business-day
+/// update duty (`GOV-REG-02` / `UPDATE_15BD`).
+///
+/// §09: *"Other modules emit a domain event `MaterialChange { waqfId, kind, effectiveDate,
+/// sourceRef }` … On receipt the engine raises `GOV-REG-02` clocked from `effectiveDate`."* And
+/// then the clause this table exists for: *"There is one open update obligation per waqf at a
+/// time. Concurrent material changes append to its CHANGE-SET rather than spawning parallel
+/// clocks; the due date is driven by the EARLIEST UN-FILED change's effective date … Filing the
+/// update closes the task and clears the change-set; a subsequent change opens a fresh clock."*
+///
+/// ⚠ A DOMAIN EVENT WITH NOWHERE TO LAND IS NOT A CHANGE-SET. Without this table the coalescing
+/// rule is unimplementable: "the earliest un-filed change" is a query over recorded changes, and
+/// "a subsequent change opens a fresh clock" needs to know which ones were already filed.
+///
+/// ── WHAT IS FROZEN, AND WHY ─────────────────────────────────────────────────────────────────
+/// `effectiveDate` IS THE STATUTORY CLOCK (CDE-Q2, owner-provisional 2026-08-25: *"The clock runs
+/// from the change's effective date … A late discovery does not extend the deadline"*). So the
+/// cause tuple — `waqfId`, `kind`, `effectiveDate`, `effectiveDateHijri` — is frozen by
+/// `material_change_cause_frozen` (migration 40, `BEFORE UPDATE`, `ENABLE ALWAYS`): editing an
+/// effective date moves a statutory deadline without recomputing it, which is precisely what
+/// `deadline_frozen_identity` exists to prevent one table over. A correction is a NEW change row,
+/// and the old one stays as the record of what was believed.
+///
+/// ── "CLEARS THE CHANGE-SET" IS NEVER A DELETE ───────────────────────────────────────────────
+/// Filing MARKS each member (`filedAt` + its frozen twin), write-once
+/// (`material_change_filing_write_once`): un-filing a change would resurrect a discharged clock.
+/// DELETE and TRUNCATE are refused outright by migration 8's retention family, which this table
+/// joins (its own triggers, reusing migration 8's function and hint mechanism) — a change row is
+/// the evidence of WHY a statutory clock started.
+model MaterialChange {
+  id                 String             @id @default(cuid())
+  waqfId             String
+  waqf               Waqf               @relation(fields: [waqfId], references: [id])
+  kind               MaterialChangeKind
+  /// The change's EFFECTIVE date — the clock, per CDE-Q2. Frozen with `kind` and `waqfId`.
+  effectiveDate      DateTime
+  effectiveDateHijri String
+  /// §09's `sourceRef`: which act or row caused this — free text, never PII.
+  sourceRef          String
+  /// CHANGE-SET MEMBERSHIP: the open `GOV-REG-02` task this change was coalesced into. Plain
+  /// column, not an FK — a change may be recorded in the same transaction that raises the task,
+  /// and it must not follow a soft-retired task into invisibility. NULL = recorded but not yet
+  /// bound (the compute refused, or the raise is the next statement).
+  complianceTaskId   String?
+  /// Set when the update is FILED — the "cleared" state, as a fact rather than an absence.
+  /// Write-once; both halves travel together (CHECK).
+  filedAt            DateTime?
+  filedAtHijri       String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  deletedAt DateTime?
+
+  /// The coalescing hot query: this endowment's UN-FILED members, earliest effective date first.
+  @@index([waqfId, filedAt, effectiveDate])
+  @@index([complianceTaskId])
+  @@map("material_change")
+}
+
+/// §09 Engine B's ESCALATION RECORD — the evidence that somebody was told, at a rung, on a day.
+///
+/// §09: *"escalates per the operating-model path — owner (Case Manager) → Nazir → Leadership
+/// (BR-1004). Each escalation writes an `EscalationEvent` + audit entry."*
+///
+/// ── APPEND-ONLY, AND THE REASON IS WHO WOULD WANT TO EDIT IT ────────────────────────────────
+/// `escalation_event_no_update` (migration 41, `ENABLE ALWAYS`) seals every column except
+/// `deletedAt`; DELETE and TRUNCATE are refused outright (this table joined migration 8's retention
+/// family). A record of notification that can be edited afterwards is not evidence of notification,
+/// and the party with the strongest motive to edit it is the party it escalated past.
+///
+/// ── ⚠ NO `dismissedAt`, NO `resolvedAt`, DELIBERATELY ───────────────────────────────────────
+/// §09: a zero-tolerance obligation *"cannot be dismissed, only resolved"*. Resolution is a fact
+/// about the OBLIGATION (`Deadline.satisfiedAt`), not about the message that reported it. A
+/// dismissal column would create exactly the affordance §09 forbids; a resolution column would put
+/// a second, editable copy of the obligation's state beside the authoritative one. The obligation
+/// side of that rule is enforced by `deadline_zero_tolerance_no_waiver`, which refuses a waiver on
+/// a zero-tolerance rule key outright — because migration 38's write-once `waivedAt` still allowed
+/// ONE waiver, and one waiver is a dismissal under another name.
+///
+/// ⚠ `deadlineId` and `complianceTaskId` are PLAIN COLUMNS, not FKs: an escalation must outlive a
+/// soft-retired deadline or task — the whole point of the record is that it survives the thing it
+/// was about.
+model EscalationEvent {
+  id                  String          @id @default(cuid())
+  waqfId              String
+  waqf                Waqf            @relation(fields: [waqfId], references: [id])
+  deadlineId          String
+  complianceTaskId    String?
+  level               EscalationLevel
+  /// The DERIVED state at the moment of escalation. CHECK-pinned to `overdue`: nothing else
+  /// escalates (`deriveEscalationLevel` returns null for every other status), and a row recording
+  /// `at_risk` would mean somebody escalated a deadline that was not yet late. Stored anyway,
+  /// because re-deriving next week gives next week's answer.
+  derivedStatus       String
+  businessDaysOverdue Int
+  /// `ordinary` | `zero_tolerance` — which ladder produced this rung. An escalation that cannot say
+  /// which ladder it came from cannot be defended against "why so soon" or "why so late".
+  ladderUsed          String
+  /// The evaluator's STATED `asOf` day (never a clock read), dual-dated like every legally
+  /// significant date here.
+  asOfDate            DateTime
+  asOfDateHijri       String
+
+  createdAt DateTime  @default(now())
+  createdBy String?
+  deletedAt DateTime?
+
+  @@index([waqfId, asOfDate])
+  @@index([deadlineId])
+  @@map("escalation_event")
+}
+
+/// Reclassification is event-sourced — append-only, never edited.
+///
+/// ⚠ **AND UNTIL S4/E3 NOTHING ENFORCED THAT SENTENCE.** The trigger inventory carried 25 triggers
+/// and not one of them was on this table, so the model's own doc comment was a claim with no
+/// implementation behind it — the exact Sprint-1 failure mode ADR-0006 and migration 3's header
+/// describe. BR-104 requires re-classification WITH HISTORY, and a history that can be rewritten is
+/// not one. Migration 12 installs three:
+///   • `reclassification_event_no_update`   BEFORE UPDATE → 42501 (DELETE and TRUNCATE are
+///     migration 6's `_no_delete` / `_no_truncate`, which already carry the retention hint)
+///   • `reclassification_event_no_truncate` BEFORE TRUNCATE         → 42501
+///   • `reclassification_event_from_matches_current` BEFORE INSERT — `NEW."from"` must equal the
+///     waqf's CURRENT classification, so a fabricated transition is unrepresentable rather than
+///     merely discouraged.
+///
+/// ⚠ **ORDERING REQUIREMENT THE `from` CHECK IMPOSES ON EVERY CALLER:** insert the event FIRST, then
+/// update `Waqf.classification`, inside one transaction. Updating the waqf first makes `from` the
+/// post-image and the insert is refused. Stated here because it is not discoverable from the column
+/// list. (An `AFTER`/deferred check cannot work: at commit the waqf already holds `to`, so `from`
+/// could never match, and the check would have to be dropped rather than deferred.)
+///
+/// ⚠ unverified — confirm vs primary law (the SAR 200M / 50M bands live in `Setting`)
+model ReclassificationEvent {
+  id      String             @id @default(cuid())
+  waqfId  String
+  waqf    Waqf               @relation(fields: [waqfId], references: [id])
+  from    WaqfClassification
+  to      WaqfClassification
+  at      DateTime
+  atHijri String
+  reason  String
+
+  createdAt DateTime @default(now())
+  createdBy String?
+
+  @@index([waqfId, at])
+  @@map("reclassification_event")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 9. DOCUMENTS — the vault (§07 §9)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Postgres stores ONLY key + metadata + hash + retention flags; the bytes live in object
+/// storage, downloaded via short-lived signed URLs minted AFTER the access-matrix check (§12).
+/// Deletion is blocked while `retentionUntil` is in the future or `legalHold = true`.
+model Document {
+  id                  String          @id @default(cuid())
+  waqfId              String
+  waqf                Waqf            @relation(fields: [waqfId], references: [id])
+  /// Set when the document belongs to one beneficiary — the path §10 narrows on for
+  /// beneficiary self-isolation (`beneficiarySelfId`).
+  beneficiaryId       String?
+  beneficiary         Beneficiary?    @relation(fields: [beneficiaryId], references: [id])
+  /// deed | certificate | title_deed | trusteeship | lease | valuation | financial | kyc |
+  /// correspondence
+  type                String
+  /// Arabic-authoritative (NFR-01)
+  titleAr             String
+  titleEn             String?
+  /// Object-store key (packages/storage)
+  storageKey          String          @unique
+  /// Integrity hash of the stored bytes
+  sha256              String
+  confidentiality     Confidentiality @default(NORMAL)
+  version             Int             @default(1)
+  /// >= 10 years (BR-702 / NFR-07). The floor lives in `Setting['retention.minimumYears']`.
+  /// ⚠ unverified — confirm vs primary law
+  retentionUntil      DateTime
+  retentionUntilHijri String
+  legalHold           Boolean         @default(false)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  deletedAt DateTime?
+
+  @@index([waqfId, type])
+  @@index([beneficiaryId])
+  @@map("document")
+}
+
+/// §09 Engine C. `filed` -> the FIU acknowledged or not; the follow-up loop moves it on.
+enum AmlReportStatus {
+  FILED
+  FIU_FOLLOWUP_REQUESTED
+  RESPONDED
+  CLOSED
+}
+
+/// Which way a piece of FIU correspondence travelled.
+enum AmlFollowUpDirection {
+  FIU_REQUEST
+  OUR_RESPONSE
+}
+
+/// The AML/CTF suspicious-activity report — BR-604, Nazarah reg. Art. 10(10), §09 Engine C.
+///
+/// It records **that a report was made** to the General Dept. of Financial Intelligence, the detailed
+/// report itself, and the FIU follow-up loop. It is not a workflow: the filing happens out of band,
+/// and this table is the evidence it happened.
+///
+/// ⚠⚠ THE COLUMN IS `confidentiality`, AND §09's OWN TS SHAPE CALLS IT `visibility`. FOLLOWING THE
+/// SPEC HERE WOULD SILENTLY DEFEAT THREE CONTROLS AND TURN NO TEST RED — measured before this table
+/// was written:
+///   • `deriveClassification()` reads `row.confidentiality`, so a `visibility` column would leave
+///     every SAR's audit events classified ROUTINE — visible in the feed every non-member reads;
+///   • `amlClause()` filters on `confidentiality`, so the SAR row itself would be readable by
+///     everyone holding a grant on the endowment;
+///   • and the both-directions parity test keys on the literal `/^\s*confidentiality\s+Confidentiality\b/`,
+///     so a `visibility` column appears on NEITHER side of the comparison and `toEqual` passes.
+/// The name is the control. §09's vocabulary is the drifted side and is noted there.
+///
+/// ⚠ THE `@default(AML_RESTRICTED)` IS NOT A CONVENIENCE. Every row this engine writes is restricted;
+/// a row born NORMAL is a tipped-off subject. The CHECK below makes the default unbypassable, because
+/// a default only governs an INSERT that omits the column.
+model AmlReport {
+  id                  String          @id @default(cuid())
+  waqfId              String
+  waqf                Waqf            @relation(fields: [waqfId], references: [id])
+  /// The AML-cleared officer who recorded the filing. Not an FK to `User` on purpose: the officer may
+  /// leave the engagement and the evidence of who filed must outlive their row.
+  filedByUserId       String
+  filedAt             DateTime
+  /// Frozen Umm-al-Qura stamp, like every other dated record (NFR-02).
+  filedAtHijri        String
+  /// The FIU's acknowledgement reference, when one is issued. Null is normal, not incomplete.
+  fiuReference        String?
+  /// The detailed report: the operation and the related parties. Highly sensitive free text.
+  /// FIELD-ENCRYPTED since migration 37 (S9-4b, owner ruling 2026-08-25 — S8-Q10 "Field-encrypt
+  /// now"): registered in `ENCRYPTED_FIELDS`, so the compartment controls who reads and the
+  /// encryption protects against the database itself leaking. Plaintext at the application
+  /// boundary, ciphertext at rest — the `...Enc` suffix records where the data ends up.
+  /// ⚠ NO `...Hmac` sibling, deliberately: "every report naming this beneficiary" is served by
+  /// `relatedPartyRefs` (plain ids); a searchable digest of free suspicion text has no lookup key
+  /// a caller could ever hold, and would only widen what an attacker with the HMAC key can probe.
+  suspicionSummaryEnc String
+  /// Beneficiary / UBO / asset ids implicated — the SUBJECTS. Plain ids, no FK: a subject may be
+  /// soft-deleted and the report must not follow it.
+  relatedPartyRefs    String[]
+  status              AmlReportStatus @default(FILED)
+  /// ⚠ THE NAME IS THE CONTROL — read the model doc above before changing it.
+  confidentiality     Confidentiality @default(AML_RESTRICTED)
+
+  followUps AmlFollowUp[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  deletedAt DateTime?
+
+  @@index([waqfId, status])
+  @@map("aml_report")
+}
+
+/// One leg of the FIU follow-up loop, inside the same compartment (§09 Engine C, C3).
+///
+/// ⚠ Carries its OWN `confidentiality` column rather than inheriting the parent's. A child whose
+/// visibility depends on a join is a child one `include` away from being readable — and the nested
+/// `include` bypass is a recorded gap in `SCOPING_KNOWN_GAPS`, not a closed one.
+model AmlFollowUp {
+  id              String               @id @default(cuid())
+  amlReportId     String
+  amlReport       AmlReport            @relation(fields: [amlReportId], references: [id])
+  /// Denormalised so the row is scopable WITHOUT a join — see the model doc.
+  waqfId          String
+  direction       AmlFollowUpDirection
+  occurredAt      DateTime
+  occurredAtHijri String
+  summary         String
+  documentIds     String[]
+  /// ⚠ THE NAME IS THE CONTROL — see `AmlReport`.
+  confidentiality Confidentiality      @default(AML_RESTRICTED)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  deletedAt DateTime?
+
+  @@index([amlReportId])
+  @@index([waqfId])
+  @@map("aml_follow_up")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 10. OPERATIONAL ENTITIES (§07 §10) — tables now, richer workflows in Phase 3
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// BR-302
+model Lease {
+  id             String   @id @default(cuid())
+  waqfId         String
+  waqf           Waqf     @relation(fields: [waqfId], references: [id])
+  assetId        String
+  asset          Asset    @relation(fields: [assetId], references: [id])
+  /// Arabic-authoritative (NFR-01)
+  tenantAr       String
+  rentSar        Decimal  @db.Decimal(18, 2)
+  startDate      DateTime
+  startDateHijri String
+  endDate        DateTime
+  endDateHijri   String
+  status         String
+  /// Ejar platform reference
+  ejarRef        String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  deletedAt DateTime?
+
+  @@index([waqfId])
+  @@index([assetId])
+  @@map("lease")
+}
+
+/// BR-303. Scoped to a waqf one hop away, via `asset.waqfId`.
+model MaintenanceTicket {
+  id            String   @id @default(cuid())
+  assetId       String
+  asset         Asset    @relation(fields: [assetId], references: [id])
+  kind          String
+  status        String
+  openedAt      DateTime
+  openedAtHijri String
+  /// Plain column, not an FK — Vendor is a global registry, not waqf-scoped, and a ticket
+  /// must survive vendor de-listing.
+  vendorId      String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  deletedAt DateTime?
+
+  @@index([assetId])
+  @@index([vendorId])
+  @@map("maintenance_ticket")
+}
+
+/// P-01..P-06 subcontractors (BR-305). GLOBAL — deliberately NOT waqf-scoped.
+model Vendor {
+  id            String    @id @default(cuid())
+  /// Arabic-authoritative (NFR-01)
+  nameAr        String
+  nameEn        String?
+  licenseNo     String?
+  licenseExpiry DateTime?
+  role          String
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  deletedAt DateTime?
+
+  @@map("vendor")
+}
+
+/// BR-612
+model LegalCase {
+  id               String    @id @default(cuid())
+  waqfId           String
+  waqf             Waqf      @relation(fields: [waqfId], references: [id])
+  /// Arabic-authoritative (NFR-01)
+  subjectAr        String
+  forum            String
+  status           String
+  nextHearing      DateTime?
+  nextHearingHijri String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  deletedAt DateTime?
+
+  @@index([waqfId])
+  @@map("legal_case")
+}
+
+/// BR-509
+model ZakatFiling {
+  id         String   @id @default(cuid())
+  waqfId     String
+  waqf       Waqf     @relation(fields: [waqfId], references: [id])
+  fiscalYear String
+  status     String
+  amountSar  Decimal? @db.Decimal(18, 2)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  deletedAt DateTime?
+
+  @@unique([waqfId, fiscalYear])
+  @@index([waqfId])
+  @@map("zakat_filing")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 11. IDENTITY, ACCESS MATRIX & MAKER-CHECKER (§07 §11)
+//
+// better-auth OWNS `User`, `Session`, `Account`, `Verification`, `TwoFactor`. They live in
+// THIS file (one schema per datasource) but their column names are dictated by the installed
+// better-auth Prisma adapter. If the adapter's expectations differ from what is written here,
+// the AUTH agent reports the delta and the DATABASE agent applies it — two agents must never
+// both edit these five models.
+// ═══════════════════════════════════════════════════════════════════════════
+
+model User {
+  // ── better-auth core fields ───────────────────────────────────────────────
+  id               String   @id
+  name             String
+  email            String   @unique
+  emailVerified    Boolean  @default(false)
+  image            String?
+  // ── better-auth twoFactor plugin ─────────────────────────────────────────
+  /// TOTP is MANDATORY for money-movement and filing roles (NFR-06).
+  /// Nullable to match `@better-auth/cli generate` exactly — the plugin treats this as an
+  /// optional column and a non-null constraint here would reject its own writes. Read it with
+  /// `hasTotpEnrolled()` (`=== true`), never as a bare truthiness check.
+  twoFactorEnabled Boolean? @default(false)
+  // ── QMULATE domain fields ────────────────────────────────────────────────
+  locale           String   @default("ar")
+  isActive         Boolean  @default(true)
+
+  sessions      Session[]
+  accounts      Account[]
+  twoFactors    TwoFactor[]
+  memberships   Membership[]
+  grants        WaqfAccessGrant[]
+  notifications Notification[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("user")
+}
+
+model Session {
+  id        String   @id
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId             String
+  providerId            String
+  password              String?
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([providerId, accountId])
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+/// TOTP enrolment state (better-auth `twoFactor` plugin). NFR-06: mandatory for the
+/// money-movement and statutory-filing seats — see `TOTP_REQUIRED_ROLES` in `@qmulate/auth`.
+///
+/// The field list is NOT hand-written: it is `@better-auth/cli generate` output for the pinned
+/// better-auth version. `verified`, `failedVerificationCount` and `lockedUntil` are written by
+/// the plugin's own enable/verify path, so omitting any of them makes TOTP enrolment fail at
+/// runtime with a Prisma validation error (it did). Re-run the CLI and diff this model whenever
+/// better-auth is upgraded.
+///
+/// `createdAt`/`updatedAt` are deliberately absent — better-auth does not supply them for this
+/// model and Prisma would reject the insert on a required column.
+model TwoFactor {
+  id                      String    @id
+  userId                  String
+  user                    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  secret                  String
+  backupCodes             String
+  verified                Boolean?  @default(true)
+  failedVerificationCount Int?      @default(0)
+  lockedUntil             DateTime?
+
+  @@index([userId])
+  @@index([secret])
+  @@map("two_factor")
+}
+
+/// Family-level access — the Family Board sees the whole family (all waqifs, all endowments).
+///
+/// ⚠ A CLIENT-LEVEL ROW CAN NEVER CONFER AN OPERATIONAL SEAT. §10 principle 2: "Scope is the
+/// endowment, not the client … never per-family." Sprint 1 accepted ALL THIRTEEN `Role` values
+/// here, with no `revokedAt`, no `validFrom`/`validUntil` and only `deletedAt` — so one row could
+/// mint a `NAZIR` role string spanning every endowment of the family, that never expires and
+/// cannot be revoked except by soft-delete. Migration `00000000000003_e2_authority_guards` adds
+/// CHECK `membership_role_family_level_only`, which restricts `role` to `FAMILY_BOARD`. Widening
+/// that list is a governance decision, not a convenience: any seat that touches money, filings or
+/// approvals must be a per-endowment `WaqfAccessGrant`.
+model Membership {
+  id       String @id @default(cuid())
+  userId   String
+  user     User   @relation(fields: [userId], references: [id])
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id])
+  role     Role
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  deletedAt DateTime?
+
+  @@unique([userId, clientId, role])
+  @@index([userId])
+  @@index([clientId])
+  @@map("membership")
+}
+
+/// THE per-endowment access matrix (NFR-05). Authorization is
+/// `(subject, role, waqfId) -> permitted actions`, enforced in `packages/api` on every
+/// procedure and mirrored by the fail-closed Prisma scoping extension in `packages/database`.
+///
+/// ── THIS TABLE IS THE AUTHORIZATION PLANE, NOT ORDINARY ENDOWMENT DATA (E2) ───────────────────
+/// Sprint 1 classified it in `WAQF_DIRECT_SCOPED_MODELS`, so the force-filter treated it like a
+/// lease or an asset: any caller holding any write-capable grant on endowment A could INSERT a
+/// `NAZIR` grant for THEMSELVES on A, with no admin, no approval and no gate — a live
+/// second-approval-authority path. Migration `00000000000003_e2_authority_guards` closes it at the
+/// database, and `extensions/scoping.ts` adds an authorization-plane write policy above it:
+///
+///   • CHECK   `waqf_access_grant_no_self_issue`   — `grantedByUserId <> userId`; a self-issued
+///     grant is unrepresentable, whoever issues the statement
+///   • CHECK   `waqf_access_grant_aml_flags`       — `canViewAmlRestricted` cannot be true while
+///     `amlCompartment` is false; two booleans that must agree, now compared
+///   • TRIGGER `waqf_access_grant_role_immutable`  — `role` is write-once. Escalation is only
+///     expressible as revoke + re-issue, which is audited and admin-gated.
+///   • TRIGGER `waqf_access_grant_permission_guard` — only `NAZIR` may hold a permission whose
+///     verb is `approve` or `sign`; every string must be a three-segment `module:resource:verb`
+///     with a verb from the closed set; wildcards are refused. `packages/domain`'s
+///     `assertGrantPermissionsWithinPreset` is the full ceiling — this is the half that survives
+///     raw SQL.
+model WaqfAccessGrant {
+  id                   String    @id @default(cuid())
+  userId               String
+  user                 User      @relation(fields: [userId], references: [id])
+  waqfId               String
+  waqf                 Waqf      @relation(fields: [waqfId], references: [id])
+  role                 Role
+  /// "module:resource:verb" tuples
+  permissions          String[]
+  /// e.g. ["finance","beneficiary","aml"]
+  dataScopes           String[]
+  canViewAmlRestricted Boolean   @default(false)
+  /// AML no-tipping-off compartment membership for this endowment (BR-604).
+  amlCompartment       Boolean   @default(false)
+  /// Beneficiary users are PINNED to their own record only — they can never enumerate
+  /// co-beneficiaries or other endowments (§10 §5, applied before role logic).
+  beneficiarySelfId    String?
+  /// Additional narrowing refs (e.g. asset ids for a subcontractor).
+  scopeRefs            String[]
+  /// Plain column, not an FK — avoids a second back-relation array on User.
+  grantedByUserId      String
+  validFrom            DateTime
+  validUntil           DateTime?
+  revokedAt            DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  deletedAt DateTime?
+
+  @@unique([userId, waqfId, role])
+  @@index([waqfId])
+  @@index([userId])
+  @@map("waqf_access_grant")
+}
+
+/// Maker-checker / reserved matters (BR-506, BR-1102).
+///
+/// ── SEGREGATION OF DUTIES, NOW ACTUALLY ENFORCED (E2) ────────────────────────────────────────
+/// Sprint 1 shipped this doc comment claiming "`checkerId` must never equal `makerId`; the check
+/// is re-verified at commit" and marked the field `/// Enforced: checker != maker` — and NOTHING
+/// implemented it: no CHECK, no trigger, no code. A claimed enforcement with no implementation is
+/// worse than an unclaimed gap, because a reader stops looking. Migration
+/// `00000000000003_e2_authority_guards` makes the claim true, in POSTGRES, so it survives
+/// `$executeRawUnsafe` and `session_replication_role = 'replica'`:
+///
+///   • CHECK  `approval_request_checker_ne_maker`     — self-approval is unrepresentable
+///   • CHECK  `approval_request_decided_requires_checker`
+///   • CHECK  `approval_request_approved_binds_payload` — an approval names the artifact it approved
+///   • TRIGGER `approval_request_authority`           — a decided row's `checkerId` must resolve to
+///     an ACTIVE `NAZIR` `waqf_access_grant` on the SAME `waqfId`, and the status transition must
+///     be legal. The Nazir is the sole approval authority, per endowment, and never the maker.
+///   • UNIQUE `approval_request_one_open_per_subject`  — at most one non-terminal row per
+///     (waqfId, type, subject), so "the approval" is never ambiguous.
+///
+/// An APPROVED `RESERVED_MATTER` row is the ONLY thing that can unlock a reserved-matter column
+/// (via `withReservedMatter`) — and per the 2026-07-27 user decision it can NEVER unlock the Shart
+/// al-Waqif columns, which are now unconditionally immutable at the database. See
+/// `src/reserved-matter.ts`.
+model ApprovalRequest {
+  id                      String              @id @default(cuid())
+  waqfId                  String
+  waqf                    Waqf                @relation(fields: [waqfId], references: [id])
+  type                    ApprovalType
+  /// WHAT reserved act this approves (BR-306 + CLAUDE.md's reserved matters). Before S4 an
+  /// `ApprovalRequest` of type `RESERVED_MATTER` did not say what it authorised at all.
+  ///
+  /// ⚠ **NULLABLE, AND NOT YET MANDATORY ON A `RESERVED_MATTER` ROW — a MEASURED gap, not an
+  /// oversight.** The CHECK this column wants is
+  /// `("type" = 'RESERVED_MATTER') = ("reservedMatterKind" IS NOT NULL)`. It is NOT installed,
+  /// because `packages/api`'s `approval.initiate` mints `RESERVED_MATTER` rows today without a kind
+  /// (root.ts), `packages/api/src/routers/settings.ts` sets `SETTING_CHANGE_APPROVAL_TYPE =
+  /// 'RESERVED_MATTER'` for every routine settings change, and three integration files
+  /// (`approval-authority`, `grant-admission`, `shart-immutability`) insert such rows raw. Landing
+  /// the mandatory CHECK from `packages/database` alone would redden files this change does not own
+  /// — the same reasoning migration 4 §3.4 used for the `approval_request` hard-delete residue.
+  /// What IS installed is the safe half: CHECK `reservedMatterKind IS NULL OR type =
+  /// 'RESERVED_MATTER'` — a kind may only appear on a reserved-matter approval.
+  /// ⚠ REPORTED AS OWED: add the biconditional CHECK in one coordinated change once every minting
+  /// path sets the field.
+  reservedMatterKind      ReservedMatterKind?
+  payload                 Json
+  status                  ApprovalStatus
+  makerId                 String
+  /// Enforced by CHECK `approval_request_checker_ne_maker` AND by trigger
+  /// `approval_request_authority` (must be an ACTIVE NAZIR grant on the same endowment).
+  ///
+  /// ⚠ **WRITE-ONCE ONCE SET, AS OF MIGRATION 22 §2 — with `decidedAt`, `decidedAtHijri` and
+  /// `checkerTotpAssertedAt`, together THE DECISION.** Migration 4 sealed WHAT WAS ASKED (waqfId,
+  /// type, makerId, subjectId, payload, payloadHash) and left WHO DECIDED unsealed, and the lattice
+  /// cannot see the gap because it is gated on a status CHANGE — so `APPROVED → APPROVED` with a
+  /// different Nazir was unchecked. MEASURED (AV7-B/D1/D1c): two Nazirs approving one PENDING request
+  /// concurrently BOTH received a success carrying their own id, three `APPROVE` events landed for one
+  /// approval, and the surviving `checkerId` varied across runs; separately, a raw swap rewrote the
+  /// recorded approver of a run that had ALREADY PAID while its `APPROVE` audit event went on naming
+  /// the original. NULL → value is the decision being taken; value → anything else is a SECOND
+  /// decision and raises 42501. **The seal is what closes the race**: `resolveApprover` reads the row
+  /// outside the write transaction and takes no lock, so the application check is a TOCTOU by
+  /// construction — the loser now blocks on the row lock, re-reads `OLD` as decided, and is refused.
+  checkerId               String?
+  /// The id of the thing being approved — the `distribution.id`, the `transaction.id`, the
+  /// reserved-matter subject. Plain column, not an FK: one approval type can point at several
+  /// tables, and an approval must survive its subject.
+  ///
+  /// Load-bearing for `approval_request_one_open_per_subject`: the partial unique index keys on
+  /// `COALESCE("subjectId", '')`, so LEAVING THIS NULL means "at most one open request of this
+  /// type on this endowment" rather than "unlimited". That is the fail-closed direction — two
+  /// simultaneously-valid approvals for one act is a second authority by arithmetic.
+  subjectId               String?
+  /// Canonical hash of the approved artifact — `computeHash(canonicalJson(subject))` from
+  /// `src/hash-chain.ts`; do NOT write a second canonicaliser. Recomputed at approve time and at
+  /// execute time so the approver provably signed the artifact they saw (§10 §4.3). A mismatch
+  /// voids the approval (`ApprovalStatus.VOID`) instead of executing a changed payload — whoever
+  /// changes the lines after approval would otherwise be the real approver.
+  payloadHash             String?
+  /// When the checker last asserted a fresh TOTP (NFR-06 step-up). Recorded as EVIDENCE; the
+  /// freshness WINDOW is `Setting['auth.totpStepUp.freshnessSeconds']` and is evaluated in the
+  /// procedure layer, because a CHECK constraint cannot read a Setting.
+  ///
+  /// ⚠ WRITE-ONCE ONCE SET (migration 22 §2) — see `checkerId`. Rewriting a recorded assertion
+  /// instant forges step-up freshness after the fact, which is the one thing this column exists to
+  /// make unforgeable.
+  checkerTotpAssertedAt   DateTime?
+  counselReviewRequired   Boolean             @default(false)
+  authorityNoticeRequired Boolean             @default(false)
+  /// The Authority reference recorded when the reserved matter was notified/approved.
+  authorityReference      String?
+  /// ⚠ WRITE-ONCE ONCE SET, BOTH HALVES (migration 22 §2) — see `checkerId`. Sealing one calendar
+  /// and not the other would permit a pair that disagrees about when the authority was exercised,
+  /// which is worse than either alone (`waqf_reversion_recorded_dual_dated`'s precedent).
+  decidedAt               DateTime?
+  decidedAtHijri          String?
+
+  /// ═══════════════════════════════════════════════════════════════════════════════════════════
+  /// THE BR-1102 CHAIN — S12-2 (migration 51). Three RECORDED FACTS, each write-once once set.
+  /// ═══════════════════════════════════════════════════════════════════════════════════════════
+  /// §10 §9, verbatim: *"initiator → `family_board` principal approval → `counsel` review → Authority
+  /// approval/notice where required → `nazir` S*. The engine disables the `nazir` sign action until
+  /// every prior step is recorded complete, and names the missing step when blocked."* Until S12-2
+  /// there was NO COLUMN for principal consent or for the review itself, and `chainState()` reported
+  /// `NOT_RECORDED` unconditionally — the honest S4 skeleton. These are the columns.
+  ///
+  /// SCOPE — a KINDED `RESERVED_MATTER` (`reservedMatterKind IS NOT NULL`). Owner ruling 2026-09-08,
+  /// verbatim *"every matter"*: counsel review is required on every reserved matter, so
+  /// `counselReviewRequired` is forced `true` on a kinded row (CHECK
+  /// `approval_request_kinded_requires_counsel_review`) and principal consent is required
+  /// unconditionally. The Authority step is conditional on `authorityNoticeRequired`. A KINDLESS
+  /// `RESERVED_MATTER` row — today the routine settings change in `routers/settings.ts` — carries
+  /// no chain and stays maker≠checker only. ⚠ SURFACED, NOT DECIDED (S12 Q8): whether a settings
+  /// change is a reserved matter at all; the honest fix is its own `ApprovalType`.
+  ///
+  /// ENFORCED THREE WAYS, none of them a doc comment: (1) CHECK
+  /// `approval_request_kinded_decision_requires_chain` — a kinded row cannot BE APPROVED/EXECUTED
+  /// with a step missing (row-local, survives raw SQL and the owner); (2) the transition trigger
+  /// refuses `PENDING → APPROVED` on a kinded row naming the first missing step; (3)
+  /// `qmulate_approval_defect()` refuses to SPEND one at the door. The app refuses before the write
+  /// with `RESERVED_MATTER_CHAIN_INCOMPLETE`, naming the steps.
+  ///
+  /// WHO RECORDS (owner ruling 2026-09-08, *"staff"*): a holder of `legal:reserved_matter:write`
+  /// records the received written approval / review against a REFERENCE (the letter's own
+  /// reference, or a vault `Document.id` when one is attached — validated to exist on THIS endowment
+  /// when supplied). A `family_board` seat may also record consent directly. `…By` is the acting
+  /// identity from the session, never an input. Each `RecordedAt/Hijri` pair moves together
+  /// (ADR-0007), and each is write-once once set — re-recording a step is a second decision.
+  principalConsentRecordedAt      DateTime?
+  principalConsentRecordedAtHijri String?
+  principalConsentBy              String?
+  principalConsentReference       String?
+  counselReviewRecordedAt         DateTime?
+  counselReviewRecordedAtHijri    String?
+  counselReviewBy                 String?
+  counselReviewReference          String?
+  /// The Authority step re-uses `authorityReference` above as its reference (required when recorded).
+  authorityNoticeRecordedAt       DateTime?
+  authorityNoticeRecordedAtHijri  String?
+  authorityNoticeBy               String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  deletedAt DateTime?
+
+  @@index([waqfId, status])
+  @@index([waqfId, type, subjectId])
+  @@map("approval_request")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 12. CROSS-CUTTING: audit spine, config, calendar, notifications (§07 §12, §12 spec)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// APPEND-ONLY, TAMPER-EVIDENT (NFR-04). Written INSIDE the same transaction as the change it
+/// describes, so an event and its subject commit or roll back together.
+///
+/// NO `updatedAt`, NO `deletedAt`, NO soft-delete — this table is never mutated.
+/// Enforced at the DATABASE, not in application code:
+///   • `audit_event_no_mutate` — a BEFORE UPDATE OR DELETE OR TRUNCATE **statement** trigger
+///     that raises SQLSTATE 42501 unconditionally. This is the LOAD-BEARING control: on
+///     Railway the runtime usually connects as the database OWNER, and an owner bypasses
+///     GRANTs but NOT triggers.
+///   • role `qmulate_app_runtime` holds SELECT + INSERT only; UPDATE/DELETE/TRUNCATE are
+///     revoked. Defence-in-depth for a future dedicated non-owner login role.
+///
+/// HASH CHAIN: `rowHash = sha256_hex( utf8(canonicalJSON(payload)) || utf8(prevHash) )`,
+/// lowercase hex, 64 chars; genesis `prevHash` = 64 zeroes. The payload is EXACTLY these 14
+/// immutable fields: id, occurredAt, actorId, actorType, onBehalfOfId, action, entityType,
+/// entityId, waqfId, before, after, context, category, classification.
+/// (DELIBERATE DEVIATION from §12, which lists 10 and omits waqfId / actorType /
+/// onBehalfOfId / category. Omitting `waqfId` would let a tamperer re-scope an event to
+/// another endowment undetected, so all four are bound into the hash. Needs a one-line §12
+/// amendment.)
+///
+/// `before`/`after` carry ONLY the keys that changed, and hold CIPHERTEXT for encrypted
+/// columns — never plaintext — so the trail never becomes a PII sink. Money is serialized as
+/// its Decimal(18,2) string form; `canonicalJSON` THROWS on a JS `number`.
+///
+/// Itself subject to the >= 10-year retention rule; never purged while any endowment it
+/// references is live or under legal hold.
+/// ⚠ unverified — confirm vs primary law (the retention floor)
+model AuditEvent {
+  id              BigInt              @id @default(autoincrement())
+  occurredAt      DateTime            @default(now())
+  occurredAtHijri String
+  /// better-auth user id; null only for system/job actors (then `actorType = SYSTEM`).
+  actorId         String?
+  actorType       AuditActorType
+  /// Set when an authorized-representative Nazir acts under delegation (BR-105) —
+  /// joint-and-several accountability is visible in the trail.
+  onBehalfOfId    String?
+  action          AuditAction
+  /// e.g. "Waqf", "Distribution", "Beneficiary", "GovernmentFiling", "Document"
+  entityType      String
+  entityId        String
+  /// Denormalized for the per-endowment access matrix and evidence-pack scoping.
+  /// Plain column, not an FK — the trail must survive its subject.
+  waqfId          String?
+  before          Json?
+  after           Json?
+  /// Request id, IP, user-agent, tRPC procedure, reason/justification, and
+  /// `reservedMatterApprovalId` when the write went through `withReservedMatter`.
+  context         Json
+  category        AuditCategory
+  classification  AuditClassification @default(ROUTINE)
+  prevHash        String              @db.Char(64)
+  rowHash         String              @db.Char(64)
+
+  @@unique([rowHash])
+  @@index([waqfId, occurredAt])
+  @@index([entityType, entityId])
+  @@index([actorId, occurredAt])
+  @@index([action, occurredAt])
+  @@map("audit_event")
+}
+
+/// Singleton chain head (`id` is pinned to 1 by the `audit_chain_head_singleton` CHECK).
+/// Read + updated under one `pg_advisory_xact_lock` per audited transaction so concurrent
+/// writers serialize and the chain can never fork. O(1) — no ORDER BY over the whole table.
+model AuditChainHead {
+  id          Int      @id @default(1)
+  lastId      BigInt   @default(0)
+  lastRowHash String   @db.Char(64)
+  updatedAt   DateTime @updatedAt
+
+  @@map("audit_chain_head")
+}
+
+/// Runtime configurability (NFR-13). Global rows have `waqfId = null`; a per-waqf row
+/// overrides the global one.
+///
+/// EVERY regulatory figure in this system lives HERE, never as a code constant, so a
+/// correction is a config change and not a deploy: the SAR 200M / 50M classification bands,
+/// the 30 / 15 / 10-business-day windows, the 3-month post-FY-end distribution window, the
+/// >= 10-year retention floor, the KYC refresh interval, the deed-set ʿushr Nazir fee, and the
+/// Authority's separate <= 10%-of-net-income fee.
+///
+/// `value` is an envelope so the staleness marker travels with the data:
+///   { "v": <value>, "unit": <string|null>, "unverified": <bool>, "source": <string>,
+///     "note": "⚠ unverified — confirm vs primary law" }   // `note` present iff `unverified`
+///
+/// NOTE: `@@unique([waqfId, key])` alone does NOT prevent duplicate GLOBAL rows (Postgres
+/// treats NULLs as distinct), so the constraints migration adds a partial unique index
+/// `setting_global_key_unique ON "setting" ("key") WHERE "waqfId" IS NULL`.
+/// ⚠ unverified — confirm vs primary law
+model Setting {
+  id     String  @id @default(cuid())
+  /// null = global
+  waqfId String?
+  waqf   Waqf?   @relation(fields: [waqfId], references: [id])
+  key    String
+  value  Json
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  deletedAt DateTime?
+
+  @@unique([waqfId, key])
+  @@index([key])
+  @@map("setting")
+}
+
+/// KSA business-day calendar: Fri/Sat weekend + Hijri-moving public holidays.
+/// Feeds the deadline engine's business-day arithmetic.
+/// ⚠ unverified — confirm vs primary law (holiday set and workweek)
+model HolidayCalendar {
+  id           String   @id @default(cuid())
+  date         DateTime @unique
+  dateHijri    String
+  /// Arabic-authoritative (NFR-01)
+  nameAr       String
+  nameEn       String?
+  isWorkingDay Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("holiday_calendar")
+}
+
+model Notification {
+  id      String    @id @default(cuid())
+  userId  String
+  user    User      @relation(fields: [userId], references: [id])
+  /// Plain column, not an FK — a notification may reference a waqf the user has since lost
+  /// access to; the scoping extension narrows Notification by `userId`, not by waqf.
+  waqfId  String?
+  kind    String
+  payload Json
+  readAt  DateTime?
+
+  createdAt DateTime @default(now())
+
+  /// ⚠ TWO CONSTRAINTS LIVE IN RAW SQL (migration 45, S10/T2) BECAUSE PRISMA CANNOT EXPRESS THEM:
+  /// a partial UNIQUE EXPRESSION index — at most one 'deadline.reminder' row per
+  /// (userId, payload->>'idempotencyKey') — and a CHECK that a reminder-kind row carries a
+  /// non-empty key (NULLs do not conflict in a unique index, so the CHECK is what closes the
+  /// key-less trapdoor). The reminder dedupe's FLOOR is the database, not the read-then-write
+  /// check in deadline.evaluate; a violating concurrent writer's transaction aborts and the
+  /// transport retry converges. 'deadline.escalation' notices deliberately have no floor here —
+  /// they ride migration 41's escalation_event index transitively (same transaction).
+  @@index([userId])
+  @@index([userId, readAt])
+  @@map("notification")
+}

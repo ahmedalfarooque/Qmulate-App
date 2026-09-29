@@ -1,0 +1,308 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "ui": "stream",
+  "globalDependencies": [
+    "pnpm-lock.yaml",
+    "tsconfig.json",
+    "packages/config/tsconfig/*.json",
+    ".env.example",
+    // ⚠ ADDED S6/E5 AFTER IT SERVED A STALE PASS AND CI CAUGHT WHAT THE LOCAL GATE DID NOT.
+    //
+    // `schema.prisma` is a CROSS-PACKAGE SOURCE OF TRUTH that several packages read AS TEXT and
+    // assert against: `@qmulate/i18n`'s `code-source-parity.test.ts` derives required catalogue
+    // keys from its enums, and `@qmulate/domain`'s `prisma-vocabulary-parity.test.ts` does the
+    // same for the engine's vocabulary. Neither package has the file in its own inputs, because it
+    // lives in `packages/database` — so turbo hashed those tasks as unchanged when the SCHEMA
+    // changed and replayed their previous PASS.
+    //
+    // MEASURED, on run 32137246961: adding `ReservedMatterKind.RECEIPT_CLASS_CORRECTION` left the
+    // catalogue without its ar/en label. `turbo run test` reported `@qmulate/i18n: 220 passed`
+    // locally — a CACHE REPLAY — while running that suite directly failed, and CI (which bypasses
+    // the cache) went red. A green local gate was therefore reporting a suite that had not run
+    // against the change it was supposed to be checking.
+    //
+    // Listing it globally is deliberately blunt: a schema change invalidates every cached task.
+    // That is the correct trade for a file whose whole role is to be the one place a vocabulary is
+    // declared — a narrower per-task `inputs` entry would have to be remembered by each future
+    // package that starts reading it, which is the same gap one level down.
+    "packages/database/prisma/schema.prisma",
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════
+    // ⊕ S7 · THE SAME HOLE, FOR THE FIVE OTHER FILES `@qmulate/i18n`'s TESTS READ AS TEXT.
+    // ═════════════════════════════════════════════════════════════════════════════════════════
+    // S6/E5 plugged `schema.prisma` and stopped there. It was not the only one — MEASURED on this
+    // branch with `pnpm turbo run test --filter=@qmulate/i18n --dry=json`:
+    //
+    //   @qmulate/i18n#test  inputs: 13  — messages/{ar,en}.json, src/*.ts, test/*.ts, package.json,
+    //                                    tsconfig.json, vitest.config.ts
+    //   globalCacheInputs files: .env.example, 4 × packages/config/tsconfig/*.json,
+    //                            packages/database/prisma/schema.prisma, pnpm-lock.yaml
+    //
+    // That is the COMPLETE hash input set, and `packages/i18n/package.json` declares NO workspace
+    // dependency on `@qmulate/domain` or `@qmulate/api` (only `@qmulate/config`, as a devDep). So
+    // there is no topological edge either — and turbo cannot hash a file it does not know about.
+    //
+    // Yet those two suites read, AS TEXT, and assert against:
+    //   · `packages/domain/src/errors.ts`              → DOMAIN_ERROR_CODES ↔ errors.domain.* parity
+    //   · `packages/api/src/errors.ts`                 → API_ERROR_CODES ↔ errors.access.* parity
+    //   · `packages/domain/src/eligibility/contract.ts`→ 3 groups + the owed register's emitted list
+    //   · `packages/api/src/routers/*.ts`              → every reason code the api emits (dir scan)
+    //   · `packages/domain/src/distribution/contract.ts` (S7) → 27 engine vocabularies
+    //   · `packages/api/src/distribution/refusal.ts`     (S7) → MAPPER_REFUSALS, MAPPING_DIAGNOSTICS
+    //
+    // ⇒ before this block, adding a `DOMAIN_ERROR_CODES` member with no ar/en message could be
+    // hashed as "i18n unchanged" and served from cache, which is byte-for-byte the S6/E5 incident
+    // (run 32137246961) with a different file. The fix has to name the files, because the dependency
+    // graph does not.
+    //
+    // ⚠ AND A LARGER FINDING THIS BLOCK DOES NOT FIX, RECORDED RATHER THAN LEFT IMPLICIT:
+    // `@qmulate/domain` HAS NO `build` SCRIPT. Every `test`/`typecheck` task depends on `^build`,
+    // so for a dependency with no build task there is nothing to depend on and NOTHING from
+    // `packages/domain/src/**` enters any other package's hash. `packages/api`'s own
+    // `reserved-matter-surface.test.ts` asserts `SHART_REFUSALS.toHaveLength(26)` against an
+    // IMPORT, and that assertion is cache-replayable after the engine's vocabulary moves. The two
+    // entries below cover the parts S7 asserts on; the general question — should the kernel package
+    // gain a build task, or should `packages/domain/src/**` be a global dependency — is a policy
+    // call for the sprint owner and is deliberately NOT decided here.
+    "packages/domain/src/errors.ts",
+    "packages/domain/src/eligibility/contract.ts",
+    "packages/domain/src/distribution/contract.ts",
+    "packages/api/src/errors.ts",
+    "packages/api/src/distribution/refusal.ts",
+    // The whole DIRECTORY is scanned by `code-source-parity.test.ts` (`readdirSync(ROUTERS_DIR)`),
+    // specifically so a router that does not exist yet is still seen. A glob is therefore the only
+    // correct spelling: naming today's eleven files would reintroduce the gap for the twelfth.
+    "packages/api/src/routers/*.ts"
+  ],
+  "globalEnv": [
+    "CI",
+    "NODE_ENV",
+    "LOG_LEVEL",
+    "PORT",
+    "TZ",
+    "DATABASE_URL",
+    // ADR-0008 round 6 — the privilege-separation credentials. These MUST be declared: turbo hashes
+    // declared environment variables into its cache key, so an UNDECLARED MIGRATOR_DATABASE_URL means
+    // a task that ran against one privilege posture can be replayed from cache against a different
+    // one — and that replay is indistinguishable from a real green.
+    "MIGRATOR_DATABASE_URL",
+    "ACCESS_MATRIX_DATABASE_URL",
+    "SUPERUSER_DATABASE_URL",
+    "DATA_CLASSIFICATION",
+    // ⊕ S12-4 · G-8 layer 1/3: required beside DATA_CLASSIFICATION=production (must be ksa).
+    "DATA_RESIDENCY",
+    "BETTER_AUTH_SECRET",
+    "BETTER_AUTH_URL",
+    "SESSION_IDLE_MINUTES",
+    "NEXT_PUBLIC_APP_URL",
+    "NEXT_PUBLIC_DEFAULT_LOCALE",
+    "SEED_FILE",
+    "FIELD_ENCRYPTION_KEYS",
+    "FIELD_ENCRYPTION_ACTIVE_KEY",
+    "FIELD_HMAC_KEY",
+    "FIELD_ENCRYPTION_DETERMINISTIC_IV"
+  ],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": [".next/**", "!.next/cache/**", "dist/**", "generated/**"]
+    },
+    "typecheck": {
+      "dependsOn": ["^build"],
+      "outputs": []
+    },
+    "lint": {
+      "dependsOn": [],
+      "outputs": []
+    },
+    "test": {
+      "dependsOn": ["^build"],
+      "outputs": ["coverage/**"]
+    },
+    "test:integration": {
+      // `^test:integration` is NOT about build ordering — it is a MUTEX.
+      //
+      // Every integration suite in this repo talks to the SAME database (one `DATABASE_URL`, one
+      // migrated schema, one seeded fixture, one global audit hash chain). `@qmulate/database` and
+      // `@qmulate/api` both define `test:integration`, and without an edge between those two tasks
+      // turbo runs them CONCURRENTLY against that shared database. That is what turned CI red on
+      // the first E2 run: `40P01 deadlock detected`, one process waiting on the audit advisory lock
+      // while the other waited on its row locks. Each package's own vitest config serializes files
+      // WITHIN the package (`fileParallelism: false` + `singleFork`) and neither had any way to
+      // serialize ACROSS packages.
+      //
+      // `@qmulate/api` depends on `@qmulate/database`, so this topological edge makes turbo order
+      // them database → api by construction, and it holds for a bare `pnpm test:integration` on a
+      // laptop as well as in CI. The CI job additionally pins `--concurrency=1`, which covers the
+      // case this edge cannot: a FUTURE package whose integration suite is not in that dependency
+      // chain would have no edge to anything and would race again. Both layers are load-bearing;
+      // `.github/workflows/ci.yml` asserts this edge still exists rather than trusting it.
+      //
+      // Cost of the edge, accepted deliberately: if `@qmulate/database`'s suite fails, turbo skips
+      // `@qmulate/api`'s instead of reporting both. A red kernel makes the api results untrustworthy
+      // anyway, but expect one failure at a time from this job.
+      "dependsOn": ["^build", "^test:integration"],
+      "cache": false,
+      // ⚠ DECLARED AT THE TASK LEVEL AS WELL AS IN `globalEnv`, and the redundancy is load-bearing.
+      // MEASURED SYMPTOM: in CI the four privilege URLs arrived EMPTY inside the vitest worker, while
+      // reaching every plain step of the same job. INFERRED CAUSE (turbo 2 defaults `envMode` to
+      // STRICT, and a `globalEnv` entry appears to cover hashing without guaranteeing passthrough
+      // into a task) — stated as an inference on purpose, because it is the belt-and-braces fix that
+      // is correct either way and CI is the thing that adjudicates it. If a later reader proves the
+      // cause was something else, fix this comment rather than leaving a confident wrong one.
+      //
+      // Why nobody noticed until CI, established by experiment rather than assumed: locally a
+      // developer has a `.env` (the documented first step is `cp .env.example .env`), and
+      // `@qmulate/config/load-env` re-populates `process.env` from it INSIDE the task — so the task
+      // never needed turbo to pass anything. CI has no `.env`. Its `env:` block reaches every plain
+      // step (which is why `provision-db-roles`, `migrate deploy` and `seed` all succeeded) and then
+      // turbo dropped the variables for the one step that runs through it. Measured: with `.env`
+      // moved aside, `pnpm run db:seed` fails locally too, exactly as CI did.
+      //
+      // Since ADR-0008 round 6 these four are not configuration — they ARE the privilege boundary,
+      // and a suite that cannot see them cannot prove anything about it. Declaring them on the task
+      // states the dependency where the task is defined, and does not rely on a developer's `.env`
+      // masking its absence.
+      "env": [
+        "DATABASE_URL",
+        "MIGRATOR_DATABASE_URL",
+        "ACCESS_MATRIX_DATABASE_URL",
+        "SUPERUSER_DATABASE_URL",
+        // S10/T1: the db suite's provision-posture test runs the FULL provision (all five URLs)
+        // to prove the repair path. Declared HERE — task-level, still never in globalEnv — after
+        // the first turbo run of that test died with "PGBOSS_DATABASE_URL is not a parseable
+        // URL": strict envMode dropped the undeclared variable exactly as the note above says it
+        // will, and the test failed LOUD rather than skipping, which is the direction that found
+        // this line. test:e2e still never declares it; apps/web stays structurally excluded.
+        "PGBOSS_DATABASE_URL"
+      ]
+    },
+    "@qmulate/jobs#test:integration": {
+      // The THIRD integration suite (S10/T1 — the pg-boss transport). Two deliberate choices:
+      //
+      // 1. THE ORDERING EDGE IS EXPLICIT, because the implicit one does not exist:
+      //    `@qmulate/jobs` has no workspace dependency on `@qmulate/database` or `@qmulate/api`,
+      //    so the `^test:integration` mutex that orders those two does NOT reach this suite, and
+      //    ci.yml's task-graph gate would rightly fail the run as "mutually unordered". Naming
+      //    `@qmulate/api#test:integration` gives database → api → jobs. The pgboss schema is not
+      //    the audit chain, but it is the same cluster — "probably disjoint enough" is how 40P01
+      //    happened the first time.
+      //
+      // 2. `PGBOSS_DATABASE_URL` IS TASK-LEVEL AND DELIBERATELY NOT IN `globalEnv` — the
+      //    TEST_ONLY_DISABLE_AUTH_RATE_LIMIT pattern, chosen over the MIGRATOR pattern
+      //    (globalEnv + `env -u` on the E2E step) after the E2E block above recorded that a
+      //    task-level env CANNOT SUBTRACT what globalEnv grants and the exclusion had to be done
+      //    with `env -u` twice. Keeping the queue credential out of globalEnv means apps/web and
+      //    the E2E leg never receive it STRUCTURALLY (strict envMode drops undeclared variables —
+      //    measured in this repo, which is why the declaration below exists at all), instead of
+      //    subtractively via a flag someone must remember. The credential is not privileged in
+      //    the owner-credential sense (see packages/config/src/privileged-urls.ts for the written
+      //    decision) but it is WORKER-ONLY, and apps/web's boot asserts that.
+      "dependsOn": ["^build", "@qmulate/api#test:integration"],
+      "cache": false,
+      "env": ["PGBOSS_DATABASE_URL"]
+    },
+    "worker#test:integration": {
+      // The FOURTH integration suite (S10/T2 — the caller): two real workers, the coverage
+      // control's structural proof, V-4(iv) by running the worker binary. Ordered after the
+      // jobs suite for the same reason jobs is ordered after api — same cluster, and the gate
+      // in ci.yml refuses mutually-unordered suites. The env list is what the sweep actually
+      // needs end to end (seat context → api caller → field encryption; the binary child
+      // inherits the task env): every name is task-level, none newly global.
+      "dependsOn": ["^build", "@qmulate/jobs#test:integration"],
+      "cache": false,
+      "env": [
+        "DATABASE_URL",
+        "PGBOSS_DATABASE_URL",
+        "MIGRATOR_DATABASE_URL",
+        "BETTER_AUTH_SECRET",
+        "BETTER_AUTH_URL",
+        "DATA_CLASSIFICATION",
+        "FIELD_ENCRYPTION_KEYS",
+        "FIELD_ENCRYPTION_ACTIVE_KEY",
+        "FIELD_HMAC_KEY"
+      ]
+    },
+    "test:guardrail": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      // Same reason as `test:integration`: strict env mode plus a privilege boundary that
+      // lives in these variables. See the note there.
+      "env": [
+        "DATABASE_URL",
+        "MIGRATOR_DATABASE_URL",
+        "ACCESS_MATRIX_DATABASE_URL",
+        "SUPERUSER_DATABASE_URL"
+      ]
+    },
+    "test:e2e": {
+      // ⚠ `"build"` (THIS package's own) AS WELL AS `"^build"` — ADDED S7, AND IT IS LOAD-BEARING.
+      //
+      // Since S7 the suite runs against `next build` + `next start` rather than `next dev`, because
+      // that is the only measured fix for the memory-threshold flake (`isDev` false ⇒ Next's restart
+      // branch cannot execute). `next start` needs a built `.next`, and nothing else in the graph
+      // produces one for THIS package: `^build` builds the dependencies, not `web` itself.
+      //
+      // And the build cannot be inherited from CI's Build job: that job runs on a SEPARATE RUNNER,
+      // and this repository has **no usable turbo remote cache** — verified, `TURBO_TOKEN` is not
+      // configured here (`ci.yml` passes `secrets.TURBO_TOKEN`, which is empty, so the cache
+      // no-ops). So the E2E job must build for itself or `next start` finds nothing.
+      // `e2e/web-server.mjs` additionally fails fast with a readable message when `.next/BUILD_ID`
+      // is absent, rather than letting Playwright's 180 s `webServer` wait time out on it.
+      "dependsOn": ["^build", "build"],
+      "cache": false,
+      // ⚠ DELIBERATELY NARROWER THAN `test:integration`: **no `MIGRATOR_DATABASE_URL`, no
+      // `SUPERUSER_DATABASE_URL`.** This task starts the Next server (Playwright's `webServer`), and
+      // `apps/web/src/instrumentation.ts` calls `assertNoPrivilegedDatabaseUrls()` at boot, which
+      // REFUSES TO START if either is present — because a web service holding the owner credential
+      // silently undoes all of ADR-0008 round 6: `qmulate_owner` owns every table and can
+      // `ALTER TABLE … DISABLE TRIGGER` every guard in migrations 1–11.
+      //
+      // This is not theoretical and it is not someone else's mistake: the first version of this block
+      // listed all four, and CI's E2E job died with
+      // `MIGRATOR_DATABASE_URL, SUPERUSER_DATABASE_URL: present in this service's environment, and
+      // must not be.` The guard caught the person who wrote the guard's CI wiring. Leaving that on the
+      // record because it is the only evidence in this repo that the boot check actually fires.
+      //
+      // ⚠ AND THIS LIST ALONE DOES NOT ACHIEVE THE EXCLUSION — measured, after it failed a second
+      // time with the identical message. `globalEnv` above declares `MIGRATOR_DATABASE_URL` and
+      // `SUPERUSER_DATABASE_URL` for the WHOLE graph, and a task-level `env` is **additive**: it
+      // cannot subtract what `globalEnv` grants. The operative control is
+      // `env -u MIGRATOR_DATABASE_URL -u SUPERUSER_DATABASE_URL` on the CI step that invokes turbo
+      // (`.github/workflows/ci.yml`, "Run E2E"). This list is kept because it states the task's real
+      // dependency, but do not read it as the thing that keeps the owner credential out.
+      //
+      // The e2e harness does not need the owner credential: CI provisions, migrates and seeds in
+      // PLAIN steps before Playwright starts, and those steps get the full job env.
+      // `ACCESS_MATRIX_DATABASE_URL` stays — `grant.activate` needs it in-process, which is itself a
+      // named open residual in ADR-0008's round-6 addendum, not a settled design.
+      //
+      // ⊕ `TEST_ONLY_DISABLE_AUTH_RATE_LIMIT` IS DECLARED HERE BECAUSE TURBO WOULD OTHERWISE DROP
+      // IT. turbo 2 defaults `envMode` to STRICT, so a variable the task does not declare does not
+      // reach the task — which for this one would mean the auth rate limiter stays fully ON, the
+      // suite collects `429 Too many requests` on ~74 sign-ins, and the failure looks like an auth
+      // bug rather than a missing declaration. It is declared on the TASK and deliberately NOT in
+      // `globalEnv`: a global declaration would hash it into every task's cache key and invite it
+      // into jobs that have no business relaxing a security control.
+      //
+      // Absent ⇒ full rate limiting (`packages/auth/src/rate-limit.ts` fails closed), and the
+      // relaxation additionally requires `DATA_CLASSIFICATION=fixture-only`. Set in `ci.yml`'s e2e
+      // job ONLY — never in `deploy-staging`, which is deliberately fixture-only and would
+      // otherwise satisfy half the condition on a deployed environment.
+      "env": ["DATABASE_URL", "ACCESS_MATRIX_DATABASE_URL", "TEST_ONLY_DISABLE_AUTH_RATE_LIMIT"]
+    },
+    "migrate:deploy": {
+      "cache": false
+    },
+    "seed": {
+      "cache": false
+    },
+    "clean": {
+      "cache": false
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    }
+  }
+}

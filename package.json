@@ -1,0 +1,61 @@
+{
+  "name": "qmulate",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "QMULATE — Saudi waqf governance & Nazarah case-management platform (Turborepo monorepo).",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@10.15.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:integration": "turbo run test:integration",
+    "test:guardrail": "turbo run test:guardrail",
+    "test:e2e": "turbo run test:e2e",
+    "test:e2e:local-fixture-only": "tsx scripts/e2e-local-fixture-only.ts",
+    "dev": "turbo run dev",
+    "clean": "turbo run clean && rm -rf node_modules .turbo",
+    "format": "prettier --write \"apps/**/*.{ts,tsx,js,jsx,mjs,cjs,json,css}\" \"packages/**/*.{ts,tsx,js,jsx,mjs,cjs,json,css}\" \"*.{json,js,ts}\"",
+    "format:check": "prettier --check \"apps/**/*.{ts,tsx,js,jsx,mjs,cjs,json,css}\" \"packages/**/*.{ts,tsx,js,jsx,mjs,cjs,json,css}\" \"*.{json,js,ts}\"",
+    "db:generate": "pnpm --filter @qmulate/database run generate",
+    "db:migrate": "pnpm --filter @qmulate/database run migrate:dev",
+    "db:migrate:deploy": "pnpm --filter @qmulate/database run migrate:deploy",
+    "db:seed": "cross-env DATA_CLASSIFICATION=fixture-only pnpm --filter @qmulate/database run seed",
+    "db:dev-admin": "cross-env DATA_CLASSIFICATION=fixture-only tsx packages/auth/src/dev-admin-setup.ts",
+    "i18n:check": "tsx scripts/check-i18n-keys.ts",
+    "db:dev": "tsx scripts/dev-postgres.ts start",
+    "db:dev:stop": "tsx scripts/dev-postgres.ts stop"
+  },
+  "scripts_note": "db:dev starts a throwaway Postgres via embedded-postgres — this machine has no Docker. CI uses a real postgres service container instead (see scripts/README.md).",
+  "devDependencies": {
+    "@qmulate/config": "workspace:*",
+    "@types/node": "^22.10.0",
+    "cross-env": "^10.1.0",
+    "embedded-postgres": "17.10.0-beta.17",
+    "eslint": "^9.30.0",
+    "prettier": "^3.6.0",
+    "tsx": "^4.19.0",
+    "turbo": "^2.5.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@embedded-postgres/darwin-arm64",
+      "@embedded-postgres/darwin-x64",
+      "@embedded-postgres/linux-arm64",
+      "@embedded-postgres/linux-x64",
+      "@embedded-postgres/windows-x64",
+      "@prisma/client",
+      "@prisma/engines",
+      "esbuild",
+      "prisma",
+      "sharp"
+    ]
+  }
+}

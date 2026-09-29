@@ -1,0 +1,1 @@
+Shared code lives here once a tech stack is chosen (see `CLAUDE.md`). Expected: `packages/ui` (design system from `docs/brand/`), `packages/database` (schema/migrations), `packages/domain` (business logic — see the domain model sketch in `CLAUDE.md`).

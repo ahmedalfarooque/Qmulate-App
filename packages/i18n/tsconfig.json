@@ -1,0 +1,11 @@
+{
+  "extends": "@qmulate/config/tsconfig/base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "messages/**/*.json", "*.config.ts"],
+  "exclude": ["node_modules", "dist"]
+}

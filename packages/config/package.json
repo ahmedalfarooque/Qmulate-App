@@ -1,0 +1,68 @@
+{
+  "name": "@qmulate/config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared build configuration for QMULATE: zod-validated environment schema (NFR-03 residency guardrail), tsconfig presets, ESLint 9 flat configs and Prettier config.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./env": "./src/env.ts",
+    "./load-env": "./src/load-env.ts",
+    "./eslint": "./eslint/base.js",
+    "./eslint/base": "./eslint/base.js",
+    "./eslint/next": "./eslint/next.js",
+    "./eslint/react": "./eslint/react.js",
+    "./prettier": "./prettier/index.js",
+    "./tsconfig/base.json": "./tsconfig/base.json",
+    "./tsconfig/nextjs.json": "./tsconfig/nextjs.json",
+    "./tsconfig/node.json": "./tsconfig/node.json",
+    "./tsconfig/react-library.json": "./tsconfig/react-library.json",
+    "./package.json": "./package.json",
+    "./privileged-urls": "./src/privileged-urls.ts"
+  },
+  "files": [
+    "src",
+    "eslint",
+    "prettier",
+    "tsconfig"
+  ],
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:guardrail": "vitest run test/env.test.ts"
+  },
+  "dependencies": {
+    "@eslint/js": "^9.30.0",
+    "@next/eslint-plugin-next": "^15.5.0",
+    "eslint-config-prettier": "^10.1.0",
+    "eslint-plugin-react": "^7.37.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "globals": "^15.15.0",
+    "typescript-eslint": "^8.36.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "eslint": "^9.30.0",
+    "prettier": "^3.6.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  },
+  "peerDependencies": {
+    "eslint": "^9.30.0",
+    "prettier": "^3.6.0",
+    "typescript": "^5.9.0"
+  },
+  "peerDependenciesMeta": {
+    "eslint": {
+      "optional": true
+    },
+    "prettier": {
+      "optional": true
+    },
+    "typescript": {
+      "optional": true
+    }
+  }
+}

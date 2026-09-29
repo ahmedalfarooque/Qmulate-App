@@ -1,0 +1,23 @@
+{
+  "source": "/Users/synrtechs/Downloads/QMULATE \u2014 Brand Guidelines.pdf",
+  "rule": "Use supplied PDF assets exactly; do not redraw the logo or introduce new photography.",
+  "colors": {
+    "ink": "#0A0B0D",
+    "graphite": "#1B1E25",
+    "mist": "#8C909B",
+    "white": "#ECEEF2",
+    "blue": "#5B7CFA",
+    "blue_tint": "#8AA4FF",
+    "line": "#252A34",
+    "panel": "#11141A"
+  },
+  "typography": {
+    "specified_in_source": "Geist Display, Geist, Geist Mono",
+    "packaged_for_templates": [
+      "Outfit-Regular",
+      "Outfit-Bold",
+      "GeistMono-Regular",
+      "GeistMono-Bold"
+    ]
+  }
+}

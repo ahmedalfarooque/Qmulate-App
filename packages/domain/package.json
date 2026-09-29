@@ -1,0 +1,37 @@
+{
+  "name": "@qmulate/domain",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Pure TypeScript domain engines for QMULATE (money, errors, access, settings, Umm-al-Qura dates, the §08 distribution engine, BR-109 Nazir eligibility, BR-104 classification gating; the compliance engine lands in E7). Imports nothing internal and performs no I/O.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./money": "./src/money.ts",
+    "./errors": "./src/errors.ts",
+    "./access": "./src/access.ts",
+    "./settings": "./src/settings.ts",
+    "./dates": "./src/dates/index.ts",
+    "./distribution": "./src/distribution/index.ts",
+    "./eligibility": "./src/eligibility/index.ts",
+    "./classification": "./src/classification/index.ts",
+    "./reconciliation": "./src/reconciliation/index.ts",
+    "./package.json": "./package.json",
+    "./ledger": "./src/ledger/index.ts",
+    "./compliance": "./src/compliance/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "decimal.js": "^10.4.3",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "fast-check": "^4.1.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}

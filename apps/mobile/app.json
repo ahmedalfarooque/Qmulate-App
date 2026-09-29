@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "QMULATE",
+    "slug": "qmulate",
+    "scheme": "qmulate",
+    "version": "0.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "platforms": ["ios", "android"],
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "sa.qmulate.portal"
+    },
+    "android": {
+      "package": "sa.qmulate.portal"
+    },
+    "extra": {
+      "defaultLocale": "ar",
+      "note": "Icons, splash, EAS project id and the production bundle identifier are Phase-2 decisions; nothing here is registered with Apple or Google yet."
+    }
+  }
+}

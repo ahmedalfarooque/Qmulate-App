@@ -1,0 +1,411 @@
+/* packages/ui/tokens/tokens.css
+ * QMULATE design tokens — light-neu (default) · dark-neu · flat report/print
+ * Source of truth: docs/product/prd/design/DESIGN.md v0.2, as distilled by the Sprint-1 E0 build contract.
+ *
+ * THIS FILE AND ./tokens.ts ARE THE ONLY PLACES A RAW HEX MAY APPEAR.
+ * No component may hand-roll a hex or a box-shadow. Depth comes only from these tokens,
+ * and only <Surface> / <Well> are permitted to emit one.
+ *
+ * Colours are SPACE-SEPARATED RGB CHANNELS so Tailwind's
+ *   rgb(var(--color-bg) / <alpha-value>)
+ * mapping works. Depth tokens keep the bare --nu-* / --glass-* names because they are
+ * whole shadow values, not RGB channels.
+ *
+ * Naming resolution (DESIGN.md contradicts itself twice — resolved by the E0 contract):
+ *   1. colour tokens are `--color-*` prefixed (required by the Tailwind alpha-value mapping).
+ *   2. primary text is `--color-ink`; `--color-white` ships as a DEPRECATED alias only.
+ */
+
+:root {
+  /* ── 1. Colour · light-neu (product + portal default) ─────────────────── */
+  --color-bg: 231 233 238; /* #E7E9EE  neumorphic canvas (the ~90%) */
+  --color-panel: 231 233 238; /* #E7E9EE  surface fill = bg; depth is shadow */
+  --color-well: 224 227 233; /* #E0E3E9  recessed/inset field fill, LCD wells */
+  --color-panel-tint: 236 238 242; /* #ECEEF2  faint lift where soft cards stack */
+  --color-hi: 255 255 255; /* #FFFFFF  neu LIGHT shadow (inline-start / top) */
+  --color-sh: 196 200 210; /* #C4C8D2  neu DARK shadow (inline-end / bottom) */
+  --color-line: 210 214 222; /* #D2D6DE  hairline divider (dense tables, rows) */
+  --color-edge: 110 116 128; /* #6E7480  affordance boundary >=3:1 (WCAG 1.4.11) */
+  --color-ink: 20 22 27; /* #14161B  primary text (AAA on --color-bg) */
+  --color-mist: 84 91 103; /* #545B67  secondary text */
+  --color-mist-2: 126 133 147; /* #7E8593  tertiary/disabled — large/decorative only */
+  --color-blue: 58 84 214; /* #3A54D6  THE accent thread */
+  --color-blue-strong: 44 58 134; /* #2C3A86  pressed/hover accent; accent text */
+  --color-blue-tint: 228 232 251; /* #E4E8FB  subtle accent fill, selected-row wash */
+
+  /* DEPRECATED alias (DESIGN.md §2.1 legacy note). Canonical = --color-ink.
+     Kept only so legacy brand CSS resolves. Do NOT use in new code. */
+  --color-white: var(--color-ink);
+
+  /* ── 2. Semantic status (info IS the brand blue — never a second blue) ── */
+  --color-success: 30 158 99; /* #1E9E63 */
+  --color-success-tint: 220 239 228; /* #DCEFE4 */
+  --color-on-success: 255 255 255; /* #FFFFFF */
+  --color-warning: 183 122 18; /* #B77A12 */
+  --color-warning-tint: 243 231 206; /* #F3E7CE */
+  --color-on-warning: 27 18 6; /* #1B1206 */
+  --color-danger: 198 54 59; /* #C6363B */
+  --color-danger-tint: 245 218 219; /* #F5DADB */
+  --color-on-danger: 255 255 255; /* #FFFFFF */
+  --color-info: 58 84 214; /* #3A54D6 */
+  --color-info-tint: 228 232 251; /* #E4E8FB */
+  --color-on-info: 255 255 255; /* #FFFFFF */
+
+  /* Financial-delta convention: positive money = success, negative = danger,
+     neutral emphasis/interaction = blue. ALWAYS dot/▲▼ + a text label, never colour alone. */
+
+  /* ── 3. Depth: neumorphic + glass ────────────────────────────────────────
+     --nu-dir is the light-source X multiplier, exposed for consumers that build their
+     own offsets (charts, NativeWind). It is set ONLY on the root element so a nested
+     dir="ltr" island (IBAN / deed-number inputs inside an RTL form) does NOT flip the
+     page's light source back. The --nu-* shadow values below are ALSO re-declared
+     literally under :root[dir="rtl"] so no calc() is required inside box-shadow. */
+  --nu-dir: 1;
+  --nu-raised-sm: -3px -3px 6px rgb(var(--color-hi)), 3px 3px 6px rgb(var(--color-sh));
+  --nu-raised-md: -6px -6px 12px rgb(var(--color-hi)), 6px 6px 12px rgb(var(--color-sh));
+  --nu-inset: inset -3px -3px 6px rgb(var(--color-hi)), inset 3px 3px 6px rgb(var(--color-sh));
+  --nu-flat: none;
+
+  --glass-fill: rgb(255 255 255 / 0.55);
+  --glass-border: rgb(255 255 255 / 0.75);
+  --glass-blur: blur(18px) saturate(1.2); /* never exceed 20px */
+  --glass-fallback: rgb(var(--color-panel) / 0.92);
+
+  /* Focus is a SOLID ring with an offset, never a soft glow (DESIGN.md §11). */
+  --focus-ring: 0 0 0 2px rgb(var(--color-bg)), 0 0 0 4px rgb(var(--color-blue));
+
+  /* ── 4. Motion ── */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1); /* the ONE easing */
+  --dur-fast: 120ms; /* the press */
+  --dur-base: 180ms;
+  --dur-slow: 240ms;
+
+  /* ── 5. Radius ── */
+  --radius-sm: 12px; /* buttons, inputs */
+  --radius-md: 16px; /* images */
+  --radius-lg: 20px; /* product cards, tiles */
+  --radius-xl: 24px; /* marketing cards */
+  --radius-full: 9999px; /* pills, switches, avatars */
+
+  /* ── 6. Spacing (4px base) ── */
+  --space-4: 4px;
+  --space-8: 8px;
+  --space-12: 12px;
+  --space-16: 16px;
+  --space-20: 20px;
+  --space-24: 24px;
+  --space-28: 28px;
+  --space-32: 32px;
+  --space-40: 40px;
+  --space-48: 48px;
+  --space-56: 56px;
+  --space-72: 72px;
+  --space-88: 88px;
+  --space-96: 96px;
+  --space-120: 120px;
+  --section-pad: clamp(24px, 7vw, 96px);
+  --container-product: 1240px;
+  --container-marketing: 1400px;
+  --tap-min: 44px;
+
+  /* ── 7. Z-index ── */
+  --z-sticky: 60; /* AppShell glass topbar */
+  --z-dropdown: 1000;
+  --z-overlay: 1100;
+  --z-modal: 1200;
+  --z-toast: 1300;
+  --z-tooltip: 1400;
+
+  /* ── 8. Type families ──
+     Bound by apps/web (next/font or @fontsource — see packages/ui/fonts/README.md). */
+  --font-sans: 'Outfit Variable', Outfit, system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', 'Geist Mono', ui-monospace, SFMono-Regular, monospace;
+  --font-ar: 'IBM Plex Sans Arabic', var(--font-sans);
+  /* --font-display-override: 'Madani';  RESERVED — no font file delivered; Q5 closed = Outfit. */
+
+  /* ── 9. Type scale ── */
+  --fs-display: clamp(2.5rem, 7vw, 4.75rem);
+  --lh-display: 1;
+  --tr-display: -0.02em;
+  --fw-display: 300;
+  --fs-h1: clamp(1.75rem, 3.4vw, 2.5rem);
+  --lh-h1: 1.05;
+  --tr-h1: -0.02em;
+  --fw-h1: 600;
+  --fs-h2: clamp(1.25rem, 2.4vw, 1.625rem);
+  --lh-h2: 1.1;
+  --tr-h2: -0.02em;
+  --fw-h2: 600;
+  --fs-h3: clamp(1.125rem, 1.6vw, 1.375rem);
+  --lh-h3: 1.2;
+  --tr-h3: -0.01em;
+  --fw-h3: 500;
+  --fs-body: 1rem;
+  --lh-body: 1.55;
+  --tr-body: 0;
+  --fw-body: 400;
+  --fs-body-sm: 0.875rem;
+  --lh-body-sm: 1.5;
+  --tr-body-sm: 0;
+  --fw-body-sm: 400;
+  --fs-label: clamp(0.6875rem, 0.9vw, 0.8125rem);
+  --lh-label: 1;
+  --tr-label: 0.13em;
+  --fw-label: 500;
+  --measure: 65ch;
+}
+
+/* ═══ RTL: flip the neumorphic light source ══════════════════════════════════
+   The light source is inline-start, so shadow X offsets mirror in RTL; Y offsets
+   never change. Scoped to the ROOT element only — a nested dir="ltr" island keeps
+   the page's light source (DESIGN.md §4.2, E0 contract risk D6). */
+:root[dir='rtl'] {
+  --nu-dir: -1;
+  --nu-raised-sm: 3px -3px 6px rgb(var(--color-hi)), -3px 3px 6px rgb(var(--color-sh));
+  --nu-raised-md: 6px -6px 12px rgb(var(--color-hi)), -6px 6px 12px rgb(var(--color-sh));
+  --nu-inset: inset 3px -3px 6px rgb(var(--color-hi)), inset -3px 3px 6px rgb(var(--color-sh));
+}
+
+/* ═══ Dark-neu (optional secondary; NEVER auto-applied from prefers-color-scheme) ═══
+   Same token NAMES, different values. */
+[data-theme='dark'] {
+  --color-bg: 24 26 32; /* #181A20 */
+  --color-panel: 24 26 32; /* #181A20 */
+  --color-well: 19 21 25; /* #131519 */
+  --color-panel-tint: 30 33 42; /* #1E212A  ⚠ DERIVED — not in DESIGN.md §2.3 */
+  --color-hi: 34 37 45; /* #22252D */
+  --color-sh: 12 13 17; /* #0C0D11 */
+  --color-line: 38 41 50; /* #262932 */
+  --color-edge: 60 65 77; /* #3C414D */
+  --color-ink: 236 238 242; /* #ECEEF2 */
+  --color-mist: 154 160 172; /* #9AA0AC */
+  --color-mist-2: 106 112 128; /* #6A7080  ⚠ DERIVED — not in DESIGN.md §2.3 */
+  --color-blue: 91 124 250; /* #5B7CFA */
+  --color-blue-strong: 138 164 255; /* #8AA4FF (text) */
+  --color-blue-tint: 26 36 64; /* #1A2440 */
+  --color-info: 91 124 250; /* #5B7CFA — info IS the accent, kept in step */
+  /* Status BASES are unchanged from light; tints are darkened — ⚠ tints ALL DERIVED,
+     not specified in DESIGN.md §2.3. Every name is re-declared rather than left to
+     inherit so each theme block is self-contained: a theme scope must never pick up
+     half its palette from an ancestor. */
+  --color-success: 30 158 99;
+  --color-success-tint: 18 46 34;
+  --color-on-success: 255 255 255;
+  --color-warning: 183 122 18;
+  --color-warning-tint: 48 35 12;
+  --color-on-warning: 236 238 242;
+  --color-danger: 198 54 59;
+  --color-danger-tint: 54 20 22;
+  --color-on-danger: 255 255 255;
+  --color-info-tint: 26 36 64;
+  --color-on-info: 255 255 255;
+  --glass-fill: rgb(34 37 45 / 0.55); /* ⚠ DERIVED */
+  --glass-border: rgb(255 255 255 / 0.1); /* ⚠ DERIVED */
+  --glass-fallback: rgb(var(--color-panel) / 0.92);
+}
+
+/* ═══ Flat report theme — statements / evidence packs / regulator output ═══
+   Works on ANY element so <ThemeScope theme="report"> can render a flat statement
+   preview inside the soft app. Shadows + blur are stripped. Never user-toggled. */
+[data-theme='report'] {
+  --color-bg: 255 255 255; /* #FFFFFF */
+  --color-panel: 255 255 255; /* #FFFFFF */
+  --color-well: 245 246 248; /* #F5F6F8 */
+  --color-panel-tint: 245 246 248; /* #F5F6F8  ⚠ DERIVED — not in DESIGN.md §2.4 */
+  --color-hi: 255 255 255;
+  --color-sh: 210 214 222;
+  --color-line: 210 214 222; /* #D2D6DE */
+  --color-edge: 154 160 172; /* #9AA0AC */
+  --color-ink: 20 22 27; /* #14161B */
+  --color-mist: 84 91 103; /* #545B67 */
+  --color-mist-2: 126 133 147; /* #7E8593  ⚠ DERIVED — not in DESIGN.md §2.4 */
+  --color-blue: 44 58 134; /* #2C3A86 — max contrast for print */
+  --color-blue-strong: 44 58 134;
+  --color-blue-tint: 228 232 251;
+  --color-info: 44 58 134;
+  /* Status = §2.2 light bases and tints, unchanged. Re-declared in full, not inherited:
+     this block also runs NESTED (<ThemeScope theme="report"> inside the soft app), so
+     under [data-theme="dark"] an inherited tint would put dark green on white paper. */
+  --color-success: 30 158 99;
+  --color-success-tint: 220 239 228;
+  --color-on-success: 255 255 255;
+  --color-warning: 183 122 18;
+  --color-warning-tint: 243 231 206;
+  --color-on-warning: 27 18 6;
+  --color-danger: 198 54 59;
+  --color-danger-tint: 245 218 219;
+  --color-on-danger: 255 255 255;
+  --color-info-tint: 228 232 251;
+  --color-on-info: 255 255 255;
+  --nu-raised-sm: none;
+  --nu-raised-md: none;
+  --nu-inset: none;
+  --glass-fill: rgb(255 255 255 / 1);
+  --glass-border: rgb(var(--color-line));
+  --glass-blur: none;
+  --glass-fallback: rgb(255 255 255);
+}
+
+[data-theme='report'],
+[data-theme='report'] *,
+[data-theme='report'] *::before,
+[data-theme='report'] *::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* ═══ Print — force the flat report theme regardless of the active app theme ═══
+   The selector list names the dark and report scopes explicitly rather than relying on
+   `:root` alone: `[data-theme="dark"]` has the same specificity as `:root`, so a palette
+   declared only on `:root` here would win by source order — a fragile guarantee for the
+   one output that goes to a regulator. The full token set is re-declared for the same
+   reason: nothing may be left to inherit from the dark palette at print time. */
+@media print {
+  :root,
+  [data-theme='dark'],
+  [data-theme='report'] {
+    --color-bg: 255 255 255;
+    --color-panel: 255 255 255;
+    --color-well: 245 246 248;
+    --color-panel-tint: 245 246 248;
+    --color-hi: 255 255 255;
+    --color-sh: 210 214 222;
+    --color-line: 210 214 222;
+    --color-edge: 154 160 172;
+    --color-ink: 20 22 27;
+    --color-mist: 84 91 103;
+    --color-mist-2: 126 133 147;
+    --color-blue: 44 58 134;
+    --color-blue-strong: 44 58 134;
+    --color-blue-tint: 228 232 251;
+    --color-info: 44 58 134;
+    --color-success: 30 158 99;
+    --color-success-tint: 220 239 228;
+    --color-on-success: 255 255 255;
+    --color-warning: 183 122 18;
+    --color-warning-tint: 243 231 206;
+    --color-on-warning: 27 18 6;
+    --color-danger: 198 54 59;
+    --color-danger-tint: 245 218 219;
+    --color-on-danger: 255 255 255;
+    --color-info-tint: 228 232 251;
+    --color-on-info: 255 255 255;
+    --nu-raised-sm: none;
+    --nu-raised-md: none;
+    --nu-inset: none;
+    --glass-fill: rgb(255 255 255 / 1);
+    --glass-blur: none;
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+}
+
+/* ═══ A11y media queries ═══ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 1ms;
+    --dur-base: 1ms;
+    --dur-slow: 1ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --glass-fill: rgb(var(--color-panel));
+    --glass-blur: none;
+  }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root {
+    --glass-fill: var(--glass-fallback);
+    --glass-blur: none;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TYPOGRAPHY LAYER — "the Arabic label problem", encoded.
+   DESIGN.md §3 / 11-localization-spec.md §4. Arabic is NEVER uppercased and
+   NEVER letter-spaced (it breaks cursive joins).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+html {
+  font-family: var(--font-sans);
+  font-size: 100%;
+}
+
+/* Scoped per element, not global — a mixed record renders each script in its face. */
+[lang='ar'] {
+  font-family: var(--font-ar);
+}
+
+/* Latin label / eyebrow: Geist Mono, UPPERCASE, +0.13em. */
+.qm-label,
+.qm-eyebrow {
+  font-family: var(--font-mono);
+  font-weight: var(--fw-label);
+  font-size: var(--fs-label);
+  line-height: var(--lh-label);
+  text-transform: uppercase;
+  letter-spacing: var(--tr-label);
+  color: rgb(var(--color-mist));
+}
+
+/* Arabic label: IBM Plex Sans Arabic 600, NO transform, NO tracking.
+   Applied three ways so it holds whether direction comes from :lang, an ancestor
+   [lang="ar"], or an explicit class from labelClass('ar') in @qmulate/i18n. */
+.qm-label:lang(ar),
+.qm-eyebrow:lang(ar),
+[lang='ar'] .qm-label,
+[lang='ar'] .qm-eyebrow,
+.qm-label--ar,
+.qm-eyebrow--ar {
+  font-family: var(--font-ar);
+  font-weight: 600;
+  font-size: var(--fs-label);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* Codes, deed numbers, IBANs and SAR figures stay Geist Mono even inside Arabic prose. */
+.qm-mono,
+.qm-num,
+.qm-currency {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.qm-num,
+.qm-currency,
+table td,
+table th {
+  font-variant-numeric: tabular-nums;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  letter-spacing: -0.02em;
+}
+
+/* Focus is a solid ring, never a glow — applied globally so nothing can opt out silently. */
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}

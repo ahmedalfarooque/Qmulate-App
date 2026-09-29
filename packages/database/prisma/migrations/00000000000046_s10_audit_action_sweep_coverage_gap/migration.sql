@@ -1,0 +1,31 @@
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+-- Migration 46 · S10/T2 — `SWEEP_COVERAGE_GAP` joins `AuditAction`.  VOCABULARY ONLY.
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+--
+-- THE ENUM'S FIRST WIDENING EVER: measured before this file existed (2026-09-01), no migration
+-- since init had touched `AuditAction`, no pin covered it, and no i18n copy keyed to any member —
+-- which is why the 13-member hand-list pin (`audit-action-vocabulary.test.ts`) landed in T1,
+-- expressly so THIS change would be deliberate instead of silent. The pin moves 13 → 14 in the
+-- same change as this file, per its own message.
+--
+-- WHAT THE MEMBER IS: the sweep-coverage control's event (G-5's second bound made loud). The
+-- deadline sweep seat runs with the scoping bypass OFF (D1), so an endowment nobody granted it is
+-- silently never swept — the force filter working correctly, with a consequence the seat cannot
+-- see. The control (`src/sweep-coverage.ts`) diffs live endowments against the seat's active
+-- grants under ITS OWN identity and records one of these per dark endowment, with the real
+-- waqfId. Like LOGIN_FAILED and ACCESS_DENIED it is a record of something that did NOT happen —
+-- that argument stands on its own (the ReservedMatterKind precedent once cited for this
+-- placement was the WRONG ENUM and is struck from the reasoning; the record carries that).
+--
+-- ⚠ ar/en STATEMENT COPY IS DECLARED OWED, NOT SHIPPED: audit actions surface in trails admins
+-- read and exports regulators see, that wording is PRODUCT-APPROVED text (E10/E12 review), and a
+-- code change may not invent it. Nothing else in the repository will demand it — the pin's
+-- message is the demand.
+--
+-- VOCABULARY ONLY, per migrations 30 and 43's own documented split: `ALTER TYPE … ADD VALUE` and
+-- a guard that must refuse correctly are two different kinds of risk. This file adds ONE enum
+-- member and nothing else; the value is NOT used anywhere in this file; the control that emits it
+-- is runtime code. `IF NOT EXISTS` for the same concurrency reason migration 43 records; safe
+-- under `migrate deploy`'s transaction on PG 12+.
+
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'SWEEP_COVERAGE_GAP';

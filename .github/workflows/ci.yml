@@ -1,0 +1,1159 @@
+####################################################################################
+# QMULATE — CI
+#
+# Job order is deliberate and chained with `needs:` so the pipeline fails fast on
+# the cheapest signal first (§17 build & ship):
+#
+#   typecheck → lint → unit → build → integration → residency-guardrail → e2e
+#                                                                        → deploy-staging
+#
+# The `residency-guardrail` job is release gate G-8: it proves the seed REFUSES to
+# run outside `DATA_CLASSIFICATION=fixture-only` and REFUSES any input file other
+# than `data/fixtures/sample-waqf.json`. A step there passes only when the seed
+# exits NON-ZERO. Real Saudi waqf data must never reach non-KSA-resident infra.
+#
+# Never `prisma db push` in CI — migrations are applied with `migrate deploy` so
+# the migration history is exercised exactly as it will be in production.
+####################################################################################
+
+name: CI
+
+on:
+  push:
+    branches: ["main", "sprint/**"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Turborepo remote cache (no-ops when the secrets are absent).
+  TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+  TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+  TURBO_TELEMETRY_DISABLED: "1"
+  NEXT_TELEMETRY_DISABLED: "1"
+  # NFR-03: every CI job is fixture-only. There is no other legal value here.
+  DATA_CLASSIFICATION: fixture-only
+  # E2 exit clause 2 requires the date engine's suite to be deterministic under TZ=UTC
+  # (business days, the 3-month post-FYE window, Umm al-Qura conversion). GitHub runners
+  # already default to UTC, so this changes nothing today — it PINS the assumption instead of
+  # inheriting it, and `TZ` is declared in turbo.json#globalEnv so a cached result from one
+  # timezone is never replayed under another.
+  TZ: UTC
+
+jobs:
+  # ────────────────────────────────────────────────────────────────────────────
+  # 1 · typecheck — cheapest signal, runs first.
+  # ────────────────────────────────────────────────────────────────────────────
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # `prisma generate` wants the datasource variable to exist. Nothing connects.
+      DATABASE_URL: postgresql://qmulate:qmulate@localhost:5432/qmulate_test?schema=public
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable corepack (pins pnpm from package.json#packageManager)
+        run: corepack enable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --filter @qmulate/database exec prisma generate
+
+      - name: Typecheck all workspaces
+        run: pnpm turbo run typecheck
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # 2 · lint — ESLint 9 flat config + Prettier formatting check.
+  # ────────────────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint
+    needs: typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: ESLint
+        run: pnpm turbo run lint
+
+      # META-TEST for the packages/domain purity boundary (Ban 4 in
+      # packages/config/eslint/base.js). ESLint being GREEN proves nothing about whether that
+      # rule still applies: its globs are relative to the ESLint base path, so adding a
+      # `packages/domain/eslint.config.js`, renaming the package directory, or editing the glob
+      # would switch the rule off silently and every lint run would stay green with the
+      # constraint gone. Before Ban 4 existed, an `@qmulate/database` import inside
+      # `packages/domain/src` genuinely exited 0.
+      #
+      # So: plant a file that violates the rule, require ESLint to reject it FOR THAT REASON,
+      # and delete it again (the `trap` runs even when a grep below fails). Same discipline as
+      # the role-enum parity test — one side must actually test the other, never be assumed.
+      #
+      # ESLint is pointed at the PROBE FILE ONLY, not at `run lint` over the package. Verified
+      # while writing this: with the rule neutered, a whole-package run still exited non-zero
+      # because of unrelated in-flight errors elsewhere in packages/domain, so the gate went red
+      # for the wrong reason and the diagnostic blamed the wrong thing. One file in, one verdict
+      # out. (`turbo run lint` above is what covers the rest of the package.)
+      - name: Lint boundary — packages/domain purity actually bites
+        run: |
+          probe=packages/domain/src/__ci_boundary_probe.ts
+          trap 'rm -f "$probe"' EXIT
+          cat > "$probe" <<'PROBE'
+          // CI PROBE — planted and deleted by the "Lint boundary" step. Never committed.
+          import type { Prisma } from '@qmulate/database';
+          export type Probe = Prisma.JsonValue;
+          PROBE
+          set +e
+          output="$(pnpm --filter @qmulate/domain exec eslint src/__ci_boundary_probe.ts 2>&1)"
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -eq 0 ]; then
+            echo "::error title=Domain purity is NOT enforced::ESLint accepted an '@qmulate/database' import inside packages/domain. The domain-purity block in packages/config/eslint/base.js is no longer matching these files (a per-package eslint.config.js, a changed glob, or a disabled rule). packages/domain must import nothing internal — the engines are property-tested with no database, no session and no clock."
+            exit 1
+          fi
+          echo "$output" | grep -q '__ci_boundary_probe' || {
+            echo "::error title=Domain purity probe was not linted::ESLint never reported on $probe. It is being ignored (an ignores entry, a tsconfig/glob change) rather than checked, so this gate is inspecting nothing."
+            exit 1
+          }
+          echo "$output" | grep -q 'no-restricted-imports' || {
+            echo "::error title=Domain purity probe failed for the wrong reason::ESLint rejected the probe, but not via no-restricted-imports. Read the log above: the purity rule may be gone and an unrelated error (parse failure, missing plugin) may be what turned the build red."
+            exit 1
+          }
+          echo "$output" | grep -q 'packages/domain is PURE' || {
+            echo "::error title=Domain purity message changed::no-restricted-imports fired, but not with the domain-purity message. If the rule was deliberately reworded, update this step in the same change so it keeps testing the right rule."
+            exit 1
+          }
+          echo "OK — ESLint rejected the internal import inside packages/domain."
+
+      # META-TEST for the runtime-app bypass ban (Ban 5 in packages/config/eslint/base.js).
+      # Same discipline as the domain probe above, and it needs its own step for a reason that
+      # was MEASURED while writing it, not predicted: the ban reaches the two apps by two
+      # DIFFERENT mechanisms, and one of them silently covered nothing.
+      #
+      #   · apps/worker has no local eslint.config.js, so ESLint's base path is the repo root
+      #     and the path-scoped glob in the shared config matches.
+      #   · apps/web HAS one, so its base path is apps/web, that glob never matches, and the ban
+      #     has to be applied by apps/web/eslint.config.js itself. Probes in apps/web/src/app
+      #     were CLEAN until it was. A reader would reasonably assume the shared config covered
+      #     both; it does not, and nothing but a probe says so.
+      #
+      # Both arms are probed in both apps: the IMPORT of a bypass-conferring export, and the
+      # hand-written `bypass:` property. A background job that acquires a force-filter bypass
+      # is not bending a convention — it is deleting the access matrix the service seat exists
+      # to operate under, unattended, with nobody reading the diff.
+      - name: Lint boundary — the runtime apps cannot build a force-filter bypass
+        run: |
+          probes="apps/worker/src/__ci_bypass_probe_import.ts apps/worker/src/__ci_bypass_probe_assign.ts apps/web/src/app/__ci_bypass_probe_import.ts apps/web/src/app/__ci_bypass_probe_assign.ts"
+          trap 'rm -f $probes' EXIT
+
+          plant() {
+            cat > "$1" <<'PROBE'
+          // CI PROBE — planted and deleted by the "Lint boundary" step. Never committed.
+          import { makeSystemContext } from '@qmulate/database';
+          export const probe = makeSystemContext;
+          PROBE
+            cat > "$2" <<'PROBE'
+          // CI PROBE — planted and deleted by the "Lint boundary" step. Never committed.
+          export const probe = { actorType: 'SYSTEM', bypass: 'system-job' };
+          PROBE
+          }
+
+          check() {
+            app="$1"; filter="$2"; imp="$3"; asg="$4"
+            set +e
+            output="$(pnpm --filter "$filter" exec eslint "$imp" "$asg" 2>&1)"
+            status=$?
+            set -e
+            echo "$output"
+
+            # GUARD 0 — the filter matched a project at all. `pnpm --filter` prints
+            # "No projects matched the filters" and exits ZERO, so a renamed package would make
+            # this whole gate pass while inspecting nothing. Measured during S10-1: the worker's
+            # package name is `worker`, not `@qmulate/worker`, and the wrong filter reported a
+            # clean run over zero files.
+            case "$output" in
+              *"No projects matched the filters"*)
+                echo "::error title=Bypass probe inspected NOTHING ($app)::pnpm --filter $filter matched no project, and pnpm exits 0 for that. The package was renamed or moved; this gate was passing over an empty universe."
+                exit 1 ;;
+            esac
+
+            # GUARD 0b — ESLint actually FOUND the files. It exits 2 with "No files matching the
+            # pattern" for an unresolvable path, which is non-zero (GUARD 1 passes) and echoes
+            # the filename (GUARD 2 passes). Without this, a path mistake leaves the gate resting
+            # on GUARD 3 alone. Measured on this step's own first draft.
+            case "$output" in
+              *"No files matching the pattern"*)
+                echo "::error title=Bypass probe path is wrong ($app)::ESLint could not resolve the probe paths, so it linted nothing. `pnpm --filter … exec` runs from the PACKAGE directory: the paths passed to check() must be app-relative (src/…), not repo-relative (apps/…)."
+                exit 1 ;;
+            esac
+
+            # GUARD 1 — ESLint rejected it.
+            if [ "$status" -eq 0 ]; then
+              echo "::error title=Bypass ban is NOT enforced in $app::ESLint accepted an import of makeSystemContext AND a hand-written bypass property. Ban 5 is no longer matching these files — a new eslint.config.js, a changed glob, or a later config re-stating no-restricted-imports/no-restricted-syntax (ESLint REPLACES a rule's options, it does not merge them). A runtime app that can build a bypass can skip the scoping extension's write-authorization guards, including the permission check that is the whole substance of the service seat."
+              exit 1
+            fi
+
+            # GUARD 2 — it was these files that were linted, not something else.
+            echo "$output" | grep -q '__ci_bypass_probe_import' || {
+              echo "::error title=Bypass import probe was not linted ($app)::ESLint never reported on $imp — it is being ignored rather than checked, so this gate is inspecting nothing."
+              exit 1
+            }
+            echo "$output" | grep -q '__ci_bypass_probe_assign' || {
+              echo "::error title=Bypass assign probe was not linted ($app)::ESLint never reported on $asg — it is being ignored rather than checked, so this gate is inspecting nothing."
+              exit 1
+            }
+
+            # GUARD 3 — both RULES fired, not one covering for the other. The import half and
+            # the assignment half are separate escalations and each has its own rule.
+            echo "$output" | grep -q 'no-restricted-imports' || {
+              echo "::error title=Bypass IMPORT ban did not fire ($app)::The probes were rejected, but not via no-restricted-imports. The import half of Ban 5 may be gone and the assignment half (or an unrelated parse error) may be what turned this red."
+              exit 1
+            }
+            echo "$output" | grep -q 'no-restricted-syntax' || {
+              echo "::error title=Bypass ASSIGN ban did not fire ($app)::The probes were rejected, but not via no-restricted-syntax. In apps/web this is the rule designSystemRestrictions clobbers unless the app re-states it."
+              exit 1
+            }
+
+            # GUARD 4 — the messages are Ban 5's, not some other restriction catching the probe
+            # incidentally. apps/web already bans @qmulate/database wholesale under src/lib and
+            # src/components for the server/client boundary, which would reject the import probe
+            # for an entirely different reason.
+            echo "$output" | grep -q 'may not import the force-filter bypass' || {
+              echo "::error title=Bypass import message changed ($app)::no-restricted-imports fired, but not with Ban 5's message — something else rejected the probe. If the rule was deliberately reworded, update this step in the same change so it keeps testing the right rule."
+              exit 1
+            }
+            echo "$output" | grep -q 'may not ASSIGN' || {
+              echo "::error title=Bypass assign message changed ($app)::no-restricted-syntax fired, but not with Ban 5's message. If the rule was deliberately reworded, update this step in the same change."
+              exit 1
+            }
+
+            echo "OK — $app cannot import or construct a force-filter bypass."
+          }
+
+          plant apps/worker/src/__ci_bypass_probe_import.ts apps/worker/src/__ci_bypass_probe_assign.ts
+          plant apps/web/src/app/__ci_bypass_probe_import.ts apps/web/src/app/__ci_bypass_probe_assign.ts
+
+          # ⚠ The paths handed to `check` are APP-RELATIVE, because `pnpm --filter … exec` runs
+          # from the package directory. Measured: repo-relative paths make ESLint exit 2 with
+          # "No files matching the pattern" — non-zero, so GUARD 1 is satisfied, and the
+          # filename appears in that very message, so GUARD 2 is satisfied too. The gate then
+          # rests entirely on GUARD 3. This is not hypothetical; it is what the first draft of
+          # this step did, and GUARD 3 is what caught it.
+          check apps/worker worker src/__ci_bypass_probe_import.ts src/__ci_bypass_probe_assign.ts
+          check apps/web web src/app/__ci_bypass_probe_import.ts src/app/__ci_bypass_probe_assign.ts
+
+      - name: Prettier (check only)
+        run: pnpm run format:check
+
+      # DoD box "Bilingual + RTL — all copy in packages/i18n (ar + en)".
+      # The catalogue-parity unit test proves ar.json and en.json agree; this proves that every
+      # key the UI actually references exists in them. Without it a component renders the raw
+      # key path ("auth.createAccount") and nothing fails.
+      - name: i18n — every referenced key resolves in ar + en
+        run: pnpm run i18n:check
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # 3 · unit — Vitest + fast-check property tests. No database.
+  #
+  # On `main` the cache is bypassed: the audit-immutability and
+  # distribution-invariant properties must actually execute on every commit to
+  # the protected branch, never be replayed from a Turborepo cache hit.
+  # ────────────────────────────────────────────────────────────────────────────
+  unit:
+    name: Unit tests
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://qmulate:qmulate@localhost:5432/qmulate_test?schema=public
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --filter @qmulate/database exec prisma generate
+
+      # No soft-skip. This loop is the only thing standing between a DELETED test file and a
+      # green build, so it must not be a hand-maintained list: Sprint 1's version named six
+      # packages (config i18n auth ui domain database), which meant a missing or deleted suite
+      # in `api`, `storage` or `jobs` could not fail the build at all — and E2 puts the whole
+      # authority kernel in `api`. Two sides that must agree, with nothing comparing them, is
+      # exactly the S1 failure mode.
+      #
+      # So the expected set is DERIVED from the workspace: EVERY `packages/*` must define a
+      # `test` script. A new package cannot ship without a suite either, and nobody has to
+      # remember to extend a literal. The floor check below exists because a glob that matches
+      # nothing would turn this whole gate into a silent no-op — the failure mode this step is
+      # here to prevent. (`apps/*` is deliberately out of scope: apps/web is covered by the e2e
+      # job's own assertion, and apps/mobile / apps/worker are still epic skeletons.)
+      # ⊕ S11 — WIDENED FROM `packages/*` TO EVERY WORKSPACE, and the reason is measured.
+      #
+      # This loop checked `packages/*` only, so it inspected nine workspaces and NO `apps/*` at
+      # all. `apps/web` defined no `test` script, so `turbo run test` ran nothing for 91 source
+      # files / 14,726 lines and no gate could notice. That hole is on the S11 record with two
+      # consequences, neither inferred: item 2b's KPI tone logic was written into `@qmulate/api`
+      # BECAUSE there was nowhere in the web app to unit-test it, and item 2c reported two
+      # mutations SURVIVED as "unkillable by construction" for the same reason.
+      #
+      # What settled that this was a DEBT and not an exemption: `apps/worker` already defined both
+      # `test` and `test:integration` and ran 3 + 9. An app CAN satisfy this gate and one already
+      # did, so no blanket `apps/*` exemption survives.
+      - name: Assert every workspace still defines a unit suite
+        run: |
+          missing=0
+          found=0
+          # ⚠ EXEMPT BY NAME, never by pattern — a second app must not inherit this.
+          #
+          # `apps/mobile` (2026-09-03): exactly ONE source file, `App.tsx`. It is the Phase-2
+          # Expo skeleton scaffolded in E0 and awaiting its own epic; there is no logic to
+          # assert. This is a DECLARED, DATED exemption rather than a silence: when that epic
+          # opens, delete this line and the gate demands a suite.
+          exempt="apps/mobile"
+          for manifest in packages/*/package.json apps/*/package.json; do
+            pkg="$(dirname "$manifest")"
+            found=$((found + 1))
+            case " $exempt " in
+              *" $pkg "*)
+                echo "$pkg is EXEMPT by name (declared in this gate, with its reason and date)."
+                continue
+                ;;
+            esac
+            if ! grep -qs '"test"[[:space:]]*:' "$manifest"; then
+              echo "::error title=Missing unit suite::$pkg does not define a \"test\" script, so \`turbo run test\` runs nothing for it and a deleted suite would go unnoticed. Add \"test\": \"vitest run\" plus a real suite (a package with no assertions is not a passing package)."
+              missing=1
+            fi
+          done
+          if [ "$found" -lt 12 ]; then
+            echo "::error title=Suite-existence gate is not running::Discovered only $found workspaces (TWELVE exist as of S11: nine under packages/ — config i18n auth ui domain database api storage jobs — and three under apps/ — web mobile worker). A glob matching fewer than that means this gate has stopped inspecting the repo, which is worse than a missing suite."
+            missing=1
+          fi
+          echo "Checked $found workspaces (packages/* and apps/*)."
+          exit $missing
+
+      # ALWAYS `--force`, on every branch — not just on main. (Changed in S3; product-owner
+      # decision 2026-07-30.)
+      #
+      # This used to bypass the cache only on `refs/heads/main`, and S3 proved that is not
+      # enough. Several suites here are CROSS-PACKAGE PARITY TESTS: they read a file belonging
+      # to another workspace as TEXT, because importing it would cycle the dependency graph
+      # (`packages/i18n`'s catalogue test reads `packages/domain/src/errors.ts`; `settings.test.ts`,
+      # `roles.test.ts`, `permissions-parity.test.ts` and `access.test.ts` do the same against
+      # the seed and `schema.prisma`). Turbo cannot see a dependency expressed as a filesystem
+      # read, so it never hashes that file and the task's cache key NEVER INVALIDATES when the
+      # thing under comparison changes.
+      #
+      # Measured, not theorised: S3 added four `DOMAIN_ERROR_CODES` with no ar/en copy, and
+      # `pnpm turbo run test` printed `@qmulate/i18n: cache hit, replaying logs` and went GREEN.
+      # The parity test that exists precisely to catch that never executed. next-intl prints a
+      # missing key rather than throwing, so an Arabic-locale user — Arabic being the
+      # authoritative language (NFR-01) — would have read `errors.domain.DISTRIBUTION_NEGATIVE`
+      # on screen, shipped by a green build.
+      #
+      # A test that CANNOT RUN is worse than a test that does not exist, because the pipeline
+      # reports its silence as success. The cost of forcing is seconds; the cost of the hole is a
+      # correctness gate that is decorative on every branch except one.
+      # ⚠ `--concurrency=2` is load-bearing, not tidiness. Without it this job FAILS WITH EVERY TEST
+      # PASSING, which is the most misleading red a pipeline can produce.
+      #
+      # MEASURED on run 31483348149 (the first CI run of `sprint/s3-e6-domain`):
+      #   Test Files  28 passed (28)
+      #   Tests       1645 passed (1645)
+      #   Errors      1 error
+      #   Error: [vitest-worker]: Timeout calling "onTaskUpdate"
+      # …then `ERROR run failed: command exited (1)`, which skipped Build, Integration, G-8 and E2E.
+      #
+      # Nothing was wrong with the code. `onTaskUpdate` is the worker→main RPC a vitest worker uses to
+      # report progress; when the main process cannot answer inside its timeout the worker treats it as
+      # fatal. Turbo was running all nine packages' suites at once, each spawning its own vitest workers,
+      # on a 2-core GitHub runner — so the box was oversubscribed several times over and the main process
+      # was starved. The same contention was measured locally at **13.7×** (a 10,000-run property takes
+      # 9.5 s alone and 129.8 s inside a full pipeline), which is why `packages/domain/vitest.config.ts`
+      # carries a 60 s per-test budget. That budget stops a *test* timing out; it cannot help an RPC
+      # channel that never gets scheduled.
+      #
+      # Capping turbo at two concurrent test tasks fixes the cause rather than the symptom. Suppressing
+      # the error, retrying the job, or lowering a timeout would each leave a pipeline that reports
+      # infrastructure starvation as a test failure — and this repo has already been bitten once by a
+      # green build that meant nothing.
+      - name: Run unit tests
+        run: |
+          echo "Bypassing the Turborepo cache on every branch so cross-package parity tests really run."
+          echo "Capped at 2 concurrent tasks: a 2-core runner starves vitest's reporter RPC otherwise."
+          pnpm turbo run test --force --concurrency=2
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # 4 · build — the whole monorepo must compile.
+  # ────────────────────────────────────────────────────────────────────────────
+  build:
+    name: Build
+    needs: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://qmulate:qmulate@localhost:5432/qmulate_test?schema=public
+      BETTER_AUTH_SECRET: ci-only-not-a-real-secret-0000000000000000
+      # Field-encryption key material (§12). Fixture-only placeholders: valid length, zero
+      # entropy, obviously not secret. Real keys live in the platform secret store (NFR-06).
+      FIELD_ENCRYPTION_KEYS: '{"1":"UU1VTEFURS1ERVYtRklYVFVSRS1PTkxZLUVOQy1LRVk="}'
+      FIELD_ENCRYPTION_ACTIVE_KEY: "1"
+      FIELD_HMAC_KEY: UU1VTEFURS1ERVYtRklYVFVSRS1PTkxZLUhNQUNLRVk=
+      BETTER_AUTH_URL: http://localhost:3000
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      NEXT_PUBLIC_DEFAULT_LOCALE: ar
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --filter @qmulate/database exec prisma generate
+
+      - name: Build all workspaces
+        run: pnpm turbo run build
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # 5 · integration — real Postgres, real migrations, real fixture seed.
+  # ────────────────────────────────────────────────────────────────────────────
+  integration:
+    name: Integration tests
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: qmulate
+          POSTGRES_PASSWORD: qmulate
+          POSTGRES_DB: qmulate_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U qmulate -d qmulate_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      NODE_ENV: test
+      # ═══════════════════════════════════════════════════════════════════════════════════════
+      # PRIVILEGE SEPARATION — FOUR CONNECTIONS, THREE ROLES  (ADR-0008 round 6)
+      # ═══════════════════════════════════════════════════════════════════════════════════════
+      # The service container's `qmulate` superuser is now CONNECTION D and nothing else. The
+      # "Provision database roles" step below creates the three separated roles, hands ownership of
+      # schema `public` to `qmulate_owner`, and applies `qmulate_apply_privilege_matrix()`.
+      #
+      # ⚠ THESE PASSWORDS ARE FIXTURE-ONLY PLACEHOLDERS IN PLAIN SIGHT, exactly like the
+      # FIELD_ENCRYPTION_* values above: this database exists for the length of one job, on
+      # localhost, and the residency guardrail refuses `DATA_CLASSIFICATION=production` against it.
+      # `scripts/provision-db-roles.ts` reads each role's password FROM the URL it will connect
+      # with, so these values are the single source of truth for both sides.
+      #
+      # ⚠ DATABASE_URL IS THE **LEAST-PRIVILEGED** ROLE. That is the whole point: it holds no
+      # INSERT/UPDATE/DELETE on `waqf_access_grant` or `membership`, owns no table, and therefore
+      # cannot `ALTER TABLE … DISABLE TRIGGER` or `SET session_replication_role`. If a future edit
+      # points it back at `qmulate` (the superuser), every privilege assertion in the suite passes
+      # for the wrong reason — which is why `authorization-plane-privilege.integration.test.ts`
+      # FAILS, never skips, when the connection it probes on is SUPERUSER or BYPASSRLS.
+      DATABASE_URL: postgresql://qmulate_app:ci-fixture-only-app@localhost:5432/qmulate_test?schema=public
+      ACCESS_MATRIX_DATABASE_URL: postgresql://qmulate_provisioner:ci-fixture-only-prov@localhost:5432/qmulate_test?schema=public
+      MIGRATOR_DATABASE_URL: postgresql://qmulate_owner:ci-fixture-only-owner@localhost:5432/qmulate_test?schema=public
+      SUPERUSER_DATABASE_URL: postgresql://qmulate:qmulate@localhost:5432/qmulate_test?schema=public
+      # S10/T1 — the queue role's OWN credential (owns schema pgboss, holds NOTHING in public).
+      # Present at JOB level because the provision step (a plain step) now creates the fourth
+      # role and its schema from it. It reaches turbo tasks ONLY where declared (strict envMode;
+      # deliberately NOT in globalEnv — see turbo.json's @qmulate/jobs#test:integration note), so
+      # the web server under test:e2e never sees it and apps/web's boot guard stays satisfied.
+      PGBOSS_DATABASE_URL: postgresql://qmulate_pgboss:ci-fixture-only-pgboss@localhost:5432/qmulate_test?schema=public
+      DATA_CLASSIFICATION: fixture-only
+      BETTER_AUTH_SECRET: ci-only-not-a-real-secret-0000000000000000
+      # Field-encryption key material (§12). Fixture-only placeholders: valid length, zero
+      # entropy, obviously not secret. Real keys live in the platform secret store (NFR-06).
+      FIELD_ENCRYPTION_KEYS: '{"1":"UU1VTEFURS1ERVYtRklYVFVSRS1PTkxZLUVOQy1LRVk="}'
+      FIELD_ENCRYPTION_ACTIVE_KEY: "1"
+      FIELD_HMAC_KEY: UU1VTEFURS1ERVYtRklYVFVSRS1PTkxZLUhNQUNLRVk=
+      BETTER_AUTH_URL: http://localhost:3000
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      NEXT_PUBLIC_DEFAULT_LOCALE: ar
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --filter @qmulate/database exec prisma generate
+
+      # ⚠ THIS STEP MUST RUN **BEFORE** MIGRATIONS, AND IT IS NOT OPTIONAL (ADR-0008 round 6).
+      #
+      # Migration 10 applies the privilege matrix itself — but it TOLERATES the roles being absent,
+      # degrading to `RAISE NOTICE`, because a hard failure there would break `prisma migrate dev` on
+      # a fresh cluster. So a job that skips this step ends up migrated, seeded and GREEN over a
+      # completely unenforced matrix. The hard failure lives in
+      # `packages/database/test/authorization-plane-privilege.integration.test.ts`, which FAILS
+      # (never skips) when the posture is absent — and the integration job runs it.
+      - name: Provision database roles (privilege separation — ADR-0008 round 6)
+        run: pnpm exec tsx scripts/provision-db-roles.ts
+
+      - name: Apply migrations (migrate deploy — never db push)
+        run: pnpm --filter @qmulate/database run migrate:deploy
+
+      - name: Seed the invented fixture
+        run: pnpm --filter @qmulate/database run seed
+
+      # No soft-skip: G-1 (audit immutability), the corpus/Shart guards and — from E2 — the
+      # authority guards (checker != maker, the per-endowment NAZIR grant lookup, the grant-role
+      # immutability trigger) live in these suites. If one disappears, the build must go red
+      # rather than quietly pass with nothing run.
+      #
+      # `packages/api` is named because E2's behavioural half — the procedure ladder, scope
+      # denial, beneficiary isolation, the AML compartment, the Setting resolver — needs a real
+      # database, so it CANNOT live in the unit job. Without this line those proofs could be
+      # deleted, or never wired up, and CI would stay green: the postgres service, the
+      # migrations and the seed are all right here and nothing would notice they went unused.
+      - name: Assert the integration suites still exist
+        run: |
+          missing=0
+          # `jobs` joined the list in S10/T1: its suite carries the STRUCTURAL dedupe proof (two
+          # pg-boss instances racing one envelope) and the Option-B posture assertions. If it
+          # vanishes, the transport's central guarantee is proven nowhere.
+          for pkg in database api jobs; do
+            grep -qs '"test:integration"' "packages/$pkg/package.json" || {
+              echo "::error title=Missing integration suite::packages/$pkg does not define \"test:integration\", so \`turbo run test:integration\` runs nothing for it. G-1 and the E2 authority guards are proven here or not at all."
+              missing=1
+            }
+          done
+          # `worker` joined in S10/T2: its suite carries the TWO-REAL-WORKERS proof, the coverage
+          # control's structural test and V-4(iv). An app, not a package — checked by its own path.
+          grep -qs '"test:integration"' "apps/worker/package.json" || {
+            echo "::error title=Missing integration suite::apps/worker does not define \"test:integration\" — the two-worker deployment proof and V-4(iv) are proven there or not at all."
+            missing=1
+          }
+          exit $missing
+
+      # THE TWO INTEGRATION SUITES SHARE ONE DATABASE AND MUST NEVER RUN CONCURRENTLY.
+      #
+      # This job stands up ONE postgres service, applies ONE set of migrations and seeds ONE
+      # fixture, and both `@qmulate/database` and `@qmulate/api` point at it through the same
+      # `DATABASE_URL`. The audit hash chain is a single global structure and several assertions
+      # COUNT audit events, so concurrent suites do not merely flake — they interleave writes into
+      # a shared serialized chain. On the first E2 run this job died with `40P01 deadlock detected`.
+      #
+      # Each package's vitest config serializes files WITHIN the package (`fileParallelism: false`
+      # + `poolOptions.forks.singleFork`) and neither had any mechanism to serialize ACROSS
+      # packages, which is why the hazard was invisible: both configs looked fully defensive.
+      #
+      # Serialization is now enforced in two independent layers, and this step checks the first:
+      #
+      #   1. turbo.json gives `test:integration` a `^test:integration` dependency, so the suites
+      #      inherit their packages' dependency order (api depends on database ⇒ database first).
+      #      That also fixes a bare `pnpm test:integration` on a laptop, not just CI. The gate
+      #      below reads the real task graph and FAILS if any two runnable integration suites are
+      #      mutually unordered — the S1 lesson applied: one side must actually test the other,
+      #      never be assumed. Verified while writing it: with the edge removed the graph reports
+      #      `UNORDERED: @qmulate/api#test:integration <-> @qmulate/database#test:integration`
+      #      and this step exits 1.
+      #   2. `--concurrency=1` on the run itself, below. The graph edge cannot cover a FUTURE
+      #      package whose integration suite sits outside the database→api dependency chain: it
+      #      would have no edge to anything and would race again. Layer 1 turns that into a red
+      #      build with an explanatory message; layer 2 means it is not a corrupted database in
+      #      the meantime.
+      - name: Assert the integration suites are serialized (shared database)
+        run: |
+          pnpm exec turbo run test:integration --dry=json > /tmp/turbo-integration-graph.json
+          cat > /tmp/assert-integration-order.mjs <<'CHECK'
+          import { readFileSync } from 'node:fs';
+          const graph = JSON.parse(readFileSync('/tmp/turbo-integration-graph.json', 'utf8'));
+          const deps = new Map(graph.tasks.map((t) => [t.taskId, t.dependencies ?? []]));
+          const real = graph.tasks
+            .filter((t) => t.task === 'test:integration' && t.command && t.command !== '<NONEXISTENT>')
+            .map((t) => t.taskId);
+          if (real.length === 0) {
+            console.error('::error title=No integration suites in the task graph::`turbo run test:integration` resolved ZERO runnable tasks, so this gate and the whole integration job would inspect nothing.');
+            process.exit(1);
+          }
+          const reaches = (from, to) => {
+            const seen = new Set();
+            const stack = [...(deps.get(from) ?? [])];
+            while (stack.length) {
+              const n = stack.pop();
+              if (n === to) return true;
+              if (seen.has(n)) continue;
+              seen.add(n);
+              stack.push(...(deps.get(n) ?? []));
+            }
+            return false;
+          };
+          const unordered = [];
+          for (let i = 0; i < real.length; i++)
+            for (let j = i + 1; j < real.length; j++)
+              if (!reaches(real[i], real[j]) && !reaches(real[j], real[i]))
+                unordered.push([real[i], real[j]]);
+          console.log(`Runnable integration tasks (${real.length}): ${real.join(', ')}`);
+          if (unordered.length) {
+            for (const [a, b] of unordered) console.error(`  UNORDERED: ${a} <-> ${b}`);
+            console.error('::error title=Integration suites are not serialized::The task pairs above have no dependency path between them, so turbo may run them CONCURRENTLY against the ONE shared database this job stands up (one DATABASE_URL, one seeded fixture, one global audit hash chain). That is the configuration that produced `40P01 deadlock detected`. Fix: keep `^test:integration` in turbo.json#tasks#test:integration#dependsOn so suites inherit their package dependency order, or give the new suite its own database/schema.');
+            process.exit(1);
+          }
+          console.log('OK — every runnable integration suite is totally ordered with respect to the others.');
+          CHECK
+          node /tmp/assert-integration-order.mjs
+
+      # `--concurrency=1`: layer 2 of the serialization above. Do not remove it to speed the job
+      # up — these suites cannot share a database concurrently, and the runtime is dominated by
+      # Postgres round-trips, not by turbo's scheduling width.
+      - name: Run integration tests
+        run: pnpm turbo run test:integration --concurrency=1
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # 6 · residency-guardrail — RELEASE GATE G-8 (NFR-03).
+  #
+  # Two assertions, both inverted: the step passes ONLY when the seed FAILS.
+  #   G-8a  the seed refuses to run unless DATA_CLASSIFICATION=fixture-only
+  #   G-8b  the seed refuses any input file except data/fixtures/sample-waqf.json
+  #
+  #   G-8c  the app refuses to boot without DATA_CLASSIFICATION
+  #   ⊕ S12-4 (E11) — the IMPORTER half, layer 3, now IN this job:
+  #   G-8d  the importer refuses DATA_CLASSIFICATION=fixture-only
+  #   G-8e  the importer AND the app refuse production without DATA_RESIDENCY=ksa
+  #   G-8f  the importer refuses the fixture as a source even on production+ksa
+  # G-8 is asserted in FULL by this job as of S12-4.
+  # ────────────────────────────────────────────────────────────────────────────
+  residency-guardrail:
+    name: Residency guardrail (G-8)
+    needs: integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: qmulate
+          POSTGRES_PASSWORD: qmulate
+          POSTGRES_DB: qmulate_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U qmulate -d qmulate_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      NODE_ENV: test
+      # Privilege separation (ADR-0008 round 6) — see the integration job for the full note.
+      # DATABASE_URL is the LEAST-PRIVILEGED role; the superuser is CONNECTION D only. The seed runs
+      # on MIGRATOR_DATABASE_URL because its step 18 lays down the first admin seat, which needs table
+      # ownership — so this job's G-8 refusals (production classification, non-fixture input path) are
+      # still exercised against the real seed program on the real credential it uses.
+      DATABASE_URL: postgresql://qmulate_app:ci-fixture-only-app@localhost:5432/qmulate_test?schema=public
+      ACCESS_MATRIX_DATABASE_URL: postgresql://qmulate_provisioner:ci-fixture-only-prov@localhost:5432/qmulate_test?schema=public
+      MIGRATOR_DATABASE_URL: postgresql://qmulate_owner:ci-fixture-only-owner@localhost:5432/qmulate_test?schema=public
+      SUPERUSER_DATABASE_URL: postgresql://qmulate:qmulate@localhost:5432/qmulate_test?schema=public
+      # S10/T1 — the queue role's OWN credential (owns schema pgboss, holds NOTHING in public).
+      # Present at JOB level because the provision step (a plain step) now creates the fourth
+      # role and its schema from it. It reaches turbo tasks ONLY where declared (strict envMode;
+      # deliberately NOT in globalEnv — see turbo.json's @qmulate/jobs#test:integration note), so
+      # the web server under test:e2e never sees it and apps/web's boot guard stays satisfied.
+      PGBOSS_DATABASE_URL: postgresql://qmulate_pgboss:ci-fixture-only-pgboss@localhost:5432/qmulate_test?schema=public
+      BETTER_AUTH_SECRET: ci-only-not-a-real-secret-0000000000000000
+      # Field-encryption key material (§12). Fixture-only placeholders: valid length, zero
+      # entropy, obviously not secret. Real keys live in the platform secret store (NFR-06).
+      FIELD_ENCRYPTION_KEYS: '{"1":"UU1VTEFURS1ERVYtRklYVFVSRS1PTkxZLUVOQy1LRVk="}'
+      FIELD_ENCRYPTION_ACTIVE_KEY: "1"
+      FIELD_HMAC_KEY: UU1VTEFURS1ERVYtRklYVFVSRS1PTkxZLUhNQUNLRVk=
+      BETTER_AUTH_URL: http://localhost:3000
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --filter @qmulate/database exec prisma generate
+
+      # ⚠ THIS STEP MUST RUN **BEFORE** MIGRATIONS, AND IT IS NOT OPTIONAL (ADR-0008 round 6).
+      #
+      # Migration 10 applies the privilege matrix itself — but it TOLERATES the roles being absent,
+      # degrading to `RAISE NOTICE`, because a hard failure there would break `prisma migrate dev` on
+      # a fresh cluster. So a job that skips this step ends up migrated, seeded and GREEN over a
+      # completely unenforced matrix. The hard failure lives in
+      # `packages/database/test/authorization-plane-privilege.integration.test.ts`, which FAILS
+      # (never skips) when the posture is absent — and the integration job runs it.
+      - name: Provision database roles (privilege separation — ADR-0008 round 6)
+        run: pnpm exec tsx scripts/provision-db-roles.ts
+
+      - name: Apply migrations
+        env:
+          DATA_CLASSIFICATION: fixture-only
+        run: pnpm --filter @qmulate/database run migrate:deploy
+
+      - name: "G-8a · seed MUST refuse DATA_CLASSIFICATION=production"
+        env:
+          DATA_CLASSIFICATION: production
+        run: |
+          set +e
+          pnpm --filter @qmulate/database run seed
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "::error title=G-8 VIOLATION::The seed ran to completion with DATA_CLASSIFICATION=production. It must refuse and exit non-zero (NFR-03 residency guardrail)."
+            exit 1
+          fi
+          echo "OK — seed refused (exit $status)."
+
+      - name: "G-8b · seed MUST refuse an input file that is not the fixture"
+        env:
+          DATA_CLASSIFICATION: fixture-only
+          # Anything other than data/fixtures/sample-waqf.json must be rejected.
+          SEED_FILE: /tmp/definitely-not-the-fixture.json
+        run: |
+          printf '{"clients":[]}' > /tmp/definitely-not-the-fixture.json
+          set +e
+          pnpm --filter @qmulate/database run seed
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "::error title=G-8 VIOLATION::The seed accepted an input file other than data/fixtures/sample-waqf.json. It must refuse and exit non-zero (NFR-03 residency guardrail)."
+            exit 1
+          fi
+          echo "OK — seed refused the foreign input file (exit $status)."
+
+      - name: "G-8c · DATA_CLASSIFICATION is required — the app must not boot without it"
+        run: |
+          cat > ./ci-env-guard.ts <<'GUARD'
+          import { getServerEnv } from '@qmulate/config/env';
+          getServerEnv();
+          console.error('BUG: the environment parsed with DATA_CLASSIFICATION unset.');
+          process.exit(0);
+          GUARD
+          set +e
+          env -u DATA_CLASSIFICATION pnpm exec tsx ./ci-env-guard.ts
+          status=$?
+          set -e
+          rm -f ./ci-env-guard.ts
+          if [ "$status" -eq 0 ]; then
+            echo "::error title=NFR-03 VIOLATION::@qmulate/config parsed the environment with DATA_CLASSIFICATION unset. It must fail fast."
+            exit 1
+          fi
+          echo "OK — env validation refused to boot without DATA_CLASSIFICATION (exit $status)."
+
+      # ⊕ S12-4 · LAYER 3 — the first-client importer (BR-1106). Three inverted assertions: the step
+      # passes ONLY when the importer REFUSES. The source is a marker-free stub so the refusal under
+      # test is the TARGET's, not the file's (G-8d/e); G-8f points production+ksa at the FIXTURE.
+      - name: "G-8d · importer MUST refuse DATA_CLASSIFICATION=fixture-only"
+        env:
+          DATA_CLASSIFICATION: fixture-only
+          DATA_RESIDENCY: ksa
+        run: |
+          printf '{"clients":[{"id":"client-001","name":"A"}]}' > /tmp/import-stub.json
+          set +e
+          pnpm --filter @qmulate/database run import -- --source /tmp/import-stub.json --dry-run
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "::error title=G-8 VIOLATION::The importer ran under DATA_CLASSIFICATION=fixture-only. It must refuse and exit non-zero (NFR-03 residency guardrail, layer 3)."
+            exit 1
+          fi
+          echo "OK — importer refused fixture-only (exit $status)."
+
+      - name: "G-8e · importer MUST refuse production without DATA_RESIDENCY=ksa — and so must the app"
+        env:
+          DATA_CLASSIFICATION: production
+          DATA_RESIDENCY: non-ksa
+        run: |
+          printf '{"clients":[{"id":"client-001","name":"A"}]}' > /tmp/import-stub.json
+          set +e
+          pnpm --filter @qmulate/database run import -- --source /tmp/import-stub.json --dry-run
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "::error title=G-8 VIOLATION::The importer ran with DATA_CLASSIFICATION=production on a non-KSA residency. It must refuse and exit non-zero (NFR-03, layer 3)."
+            exit 1
+          fi
+          echo "OK — importer refused production+non-ksa (exit $status)."
+          # The app-boot form (layer 1, extended): @qmulate/config must refuse the same posture.
+          cat > ./ci-env-guard.ts <<'GUARD'
+          import { getServerEnv } from '@qmulate/config/env';
+          getServerEnv();
+          console.error('BUG: the environment parsed with DATA_CLASSIFICATION=production and DATA_RESIDENCY=non-ksa.');
+          process.exit(0);
+          GUARD
+          set +e
+          pnpm exec tsx ./ci-env-guard.ts
+          status=$?
+          set -e
+          rm -f ./ci-env-guard.ts
+          if [ "$status" -eq 0 ]; then
+            echo "::error title=NFR-03 VIOLATION::@qmulate/config parsed a non-KSA production posture. The app must refuse to boot (G-8 layer 1)."
+            exit 1
+          fi
+          echo "OK — env validation refused production+non-ksa (exit $status)."
+
+      - name: "G-8f · importer MUST refuse the fixture as a source, even on production+ksa"
+        env:
+          DATA_CLASSIFICATION: production
+          DATA_RESIDENCY: ksa
+        run: |
+          set +e
+          pnpm --filter @qmulate/database run import -- --source data/fixtures/sample-waqf.json --dry-run
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "::error title=G-8 VIOLATION::The importer accepted data/fixtures/sample-waqf.json as a source. Invented data is the seed's; the importer must refuse it (NFR-03, layer 3)."
+            exit 1
+          fi
+          echo "OK — importer refused the fixture as a source (exit $status)."
+
+      - name: "Package-level guardrail tests (if any)"
+        env:
+          DATA_CLASSIFICATION: fixture-only
+        run: |
+          if ! grep -rqs '"test:guardrail"' apps/*/package.json packages/*/package.json; then
+            echo "::notice title=No guardrail unit tests yet::No workspace defines a \"test:guardrail\" script — the shell assertions above are the gate."
+            exit 0
+          fi
+          pnpm turbo run test:guardrail
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # 7 · e2e — Playwright, both locales (ar + en). Last, and blocking.
+  # ────────────────────────────────────────────────────────────────────────────
+  e2e:
+    name: E2E (Playwright, ar + en)
+    needs: residency-guardrail
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    continue-on-error: false
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: qmulate
+          POSTGRES_PASSWORD: qmulate
+          POSTGRES_DB: qmulate_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U qmulate -d qmulate_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      NODE_ENV: test
+      # ═══════════════════════════════════════════════════════════════════════════════════════
+      # PRIVILEGE SEPARATION — FOUR CONNECTIONS, THREE ROLES  (ADR-0008 round 6)
+      # ═══════════════════════════════════════════════════════════════════════════════════════
+      # The service container's `qmulate` superuser is now CONNECTION D and nothing else. The
+      # "Provision database roles" step below creates the three separated roles, hands ownership of
+      # schema `public` to `qmulate_owner`, and applies `qmulate_apply_privilege_matrix()`.
+      #
+      # ⚠ THESE PASSWORDS ARE FIXTURE-ONLY PLACEHOLDERS IN PLAIN SIGHT, exactly like the
+      # FIELD_ENCRYPTION_* values above: this database exists for the length of one job, on
+      # localhost, and the residency guardrail refuses `DATA_CLASSIFICATION=production` against it.
+      # `scripts/provision-db-roles.ts` reads each role's password FROM the URL it will connect
+      # with, so these values are the single source of truth for both sides.
+      #
+      # ⚠ DATABASE_URL IS THE **LEAST-PRIVILEGED** ROLE. That is the whole point: it holds no
+      # INSERT/UPDATE/DELETE on `waqf_access_grant` or `membership`, owns no table, and therefore
+      # cannot `ALTER TABLE … DISABLE TRIGGER` or `SET session_replication_role`. If a future edit
+      # points it back at `qmulate` (the superuser), every privilege assertion in the suite passes
+      # for the wrong reason — which is why `authorization-plane-privilege.integration.test.ts`
+      # FAILS, never skips, when the connection it probes on is SUPERUSER or BYPASSRLS.
+      DATABASE_URL: postgresql://qmulate_app:ci-fixture-only-app@localhost:5432/qmulate_test?schema=public
+      ACCESS_MATRIX_DATABASE_URL: postgresql://qmulate_provisioner:ci-fixture-only-prov@localhost:5432/qmulate_test?schema=public
+      MIGRATOR_DATABASE_URL: postgresql://qmulate_owner:ci-fixture-only-owner@localhost:5432/qmulate_test?schema=public
+      SUPERUSER_DATABASE_URL: postgresql://qmulate:qmulate@localhost:5432/qmulate_test?schema=public
+      # S10/T1 — the queue role's OWN credential (owns schema pgboss, holds NOTHING in public).
+      # Present at JOB level because the provision step (a plain step) now creates the fourth
+      # role and its schema from it. It reaches turbo tasks ONLY where declared (strict envMode;
+      # deliberately NOT in globalEnv — see turbo.json's @qmulate/jobs#test:integration note), so
+      # the web server under test:e2e never sees it and apps/web's boot guard stays satisfied.
+      PGBOSS_DATABASE_URL: postgresql://qmulate_pgboss:ci-fixture-only-pgboss@localhost:5432/qmulate_test?schema=public
+      DATA_CLASSIFICATION: fixture-only
+      BETTER_AUTH_SECRET: ci-only-not-a-real-secret-0000000000000000
+      # Field-encryption key material (§12). Fixture-only placeholders: valid length, zero
+      # entropy, obviously not secret. Real keys live in the platform secret store (NFR-06).
+      FIELD_ENCRYPTION_KEYS: '{"1":"UU1VTEFURS1ERVYtRklYVFVSRS1PTkxZLUVOQy1LRVk="}'
+      FIELD_ENCRYPTION_ACTIVE_KEY: "1"
+      FIELD_HMAC_KEY: UU1VTEFURS1ERVYtRklYVFVSRS1PTkxZLUhNQUNLRVk=
+      BETTER_AUTH_URL: http://localhost:3000
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      NEXT_PUBLIC_DEFAULT_LOCALE: ar
+      # ═══════════════════════════════════════════════════════════════════════════════════════
+      # ⚠ TEST-ONLY: THE AUTH RATE LIMITER IS RELAXED FOR THIS JOB, AND FOR NO OTHER
+      # ═══════════════════════════════════════════════════════════════════════════════════════
+      # Since S7 this job runs Playwright against `next build` + `next start` rather than
+      # `next dev` — the only measured fix for the memory-threshold restart that made seven
+      # consecutive E2E legs green-by-retry (`isDev` is false, so Next's restart branch cannot
+      # execute). A production server, however, ENFORCES better-auth's rate limiter, and the suite
+      # signs in ~74 times from one IP: measured as `429 Too many requests` on
+      # `/api/auth/sign-in/email` and `/two-factor/enable`, cascading into "no session was
+      # published". better-auth's built-in `/sign-in*` rule is 3 per 10 s, and no `window`/`max`
+      # setting widens it.
+      #
+      # Owner-approved (`docs/product/prd/S4-owner-decision-memo.md` — "S7 · E2E-vs-rate-limiter
+      # posture", 2026-08-19): a test-environment-only override that FAILS CLOSED.
+      #
+      # ⚠ IT REQUIRES TWO INDEPENDENT CONDITIONS AND THIS LINE IS ONLY ONE OF THEM. The other is
+      # `DATA_CLASSIFICATION=fixture-only`, above. Neither is sufficient alone — and the reason the
+      # classification is not sufficient is one job below: `deploy-staging` ALSO sets
+      # `fixture-only`, deliberately, because staging is not KSA-resident. A classification-only
+      # gate would therefore have switched the limiter off on a DEPLOYED environment.
+      #
+      # ⚠ THIS VARIABLE MUST NOT BE PROMOTED TO THE WORKFLOW-LEVEL `env:` BLOCK AND MUST NOT APPEAR
+      # IN `deploy-staging`. It is scoped to the one job that runs the suite. Absent ⇒ full rate
+      # limiting, by construction (`packages/auth/src/rate-limit.ts`); an unrecognised value ⇒ the
+      # app REFUSES TO BOOT (`packages/config/src/env.ts`) rather than being interpreted.
+      TEST_ONLY_DISABLE_AUTH_RATE_LIMIT: disabled-for-tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --filter @qmulate/database exec prisma generate
+
+      # ⚠ THIS STEP MUST RUN **BEFORE** MIGRATIONS, AND IT IS NOT OPTIONAL (ADR-0008 round 6).
+      #
+      # Migration 10 applies the privilege matrix itself — but it TOLERATES the roles being absent,
+      # degrading to `RAISE NOTICE`, because a hard failure there would break `prisma migrate dev` on
+      # a fresh cluster. So a job that skips this step ends up migrated, seeded and GREEN over a
+      # completely unenforced matrix. The hard failure lives in
+      # `packages/database/test/authorization-plane-privilege.integration.test.ts`, which FAILS
+      # (never skips) when the posture is absent — and the integration job runs it.
+      - name: Provision database roles (privilege separation — ADR-0008 round 6)
+        run: pnpm exec tsx scripts/provision-db-roles.ts
+
+      - name: Apply migrations + seed the fixture
+        run: |
+          pnpm --filter @qmulate/database run migrate:deploy
+          pnpm --filter @qmulate/database run seed
+
+      # No soft-skip: `apps/web` has shipped Playwright specs since Sprint 1, so a missing
+      # `test:e2e` script means the suite was deleted, not that it does not exist yet.
+      - name: Assert the E2E suite still exists
+        run: |
+          grep -qs '"test:e2e"' apps/web/package.json || {
+            echo "::error title=Missing E2E suite::apps/web no longer defines \"test:e2e\"."
+            exit 1
+          }
+
+      # `--filter web`, NOT a bare `pnpm exec`. `@playwright/test` is a devDependency of
+      # `apps/web` alone and pnpm's isolated node_modules keeps it out of the root bin dir, so
+      # the bare form fails with "Command \"playwright\" not found" — which is exactly how this
+      # job failed on the very first real CI run.
+      #
+      # ⚠ SPLIT IN TWO, AND EACH HALF TIMEBOXED — BECAUSE THIS STEP HUNG FOR 34 MINUTES ON THREE
+      # CONSECUTIVE RUNS AND TOOK THE WHOLE JOB WITH IT (S7, 2026-08-19).
+      #
+      # Measured, from the job step timings (`gh api …/actions/jobs/<id>`), not inferred:
+      #
+      #   run 32227631352 (main)        07:35:33 -> 08:09:57   34m24s   cancelled
+      #   run 32227632164 (sprint/s7)   07:35:38 -> 08:10:01   34m23s   cancelled
+      #   run 32231460009 (sprint/s7)   08:24:16 -> 08:58:30   34m14s   cancelled
+      #
+      # In all three, `Run E2E (ar + en)` is **skipped** — THE SUITE NEVER RAN. The job's
+      # `timeout-minutes: 35` is what ended them, and GitHub reports a job timeout as
+      # `cancelled`, which is why the first reading of these runs was "something cancelled them".
+      # Nothing did: no newer run existed and the remote heads were untouched.
+      #
+      # ⚠ AND NONE OF IT WAS THE FLAKE, THE DEV SERVER OR THE RATE LIMITER. The third run carries
+      # the production-build harness whose E2E leg measures **20.5 s locally**. A leg that takes 20
+      # seconds on a laptop and >34 minutes here is hanging on something belonging to this job, and
+      # conflating it with the memory-threshold flake would have buried both.
+      #
+      # `playwright install --with-deps` shells out to `apt-get` for Chromium's shared libraries,
+      # and apt blocks indefinitely on a dpkg lock (the runner image's own unattended-upgrades is
+      # the usual holder). A blocked apt produces no output and no exit, so the step cannot say what
+      # it is waiting for — which is precisely why a cancelled step uploads no log and the three
+      # runs above are silent.
+      #
+      # THREE CHANGES, EACH DOING ONE THING:
+      #   1. `install-deps` is its own step, so the log NAMES which half hangs.
+      #   2. Both halves are timeboxed WELL under the job budget, so a hang fails fast with a
+      #      diagnostic instead of eating 35 minutes and reporting `cancelled`. Same principle as
+      #      the E2E tripwire: a failure that is visible beats one that is absorbed.
+      #   3. `install-deps` is `continue-on-error`. The ubuntu-24.04 runner image already ships
+      #      Chromium's libraries, so apt is belt — and belt must not be able to stop the trousers.
+      #      ⚠ If a library really is missing, `chromium` fails to LAUNCH on the next step with a
+      #      named missing `.so`, which is a loud, five-second failure rather than a silent stall.
+      #
+      # `--filter web`, NOT a bare `pnpm exec`. `@playwright/test` is a devDependency of `apps/web`
+      # alone and pnpm's isolated node_modules keeps it out of the root bin dir, so the bare form
+      # fails with "Command \"playwright\" not found" — which is exactly how this job failed on the
+      # very first real CI run.
+      - name: Install Playwright system deps (belt — the runner image already ships them)
+        timeout-minutes: 6
+        continue-on-error: true
+        run: pnpm --filter web exec playwright install-deps chromium
+
+      - name: Install Playwright browser (chromium)
+        timeout-minutes: 8
+        run: pnpm --filter web exec playwright install chromium
+
+      # ⚠ THE OWNER AND SUPERUSER CREDENTIALS ARE STRIPPED FOR THIS STEP ONLY.
+      #
+      # This job legitimately needs them: the provision / migrate deploy / seed steps above run as
+      # `qmulate_owner`. But this step starts the Next server (Playwright's `webServer`), and
+      # `apps/web/src/instrumentation.ts` calls `assertNoPrivilegedDatabaseUrls()` at boot, which
+      # REFUSES TO START when either is present — correctly, because a web service holding the owner
+      # credential can `ALTER TABLE … DISABLE TRIGGER` every guard in migrations 1–11 and silently
+      # undo all of ADR-0008 round 6.
+      #
+      # `env -u` rather than a narrower `env:` list on the turbo task: `globalEnv` in `turbo.json`
+      # declares these two for the whole graph, and a task-level `env` is ADDITIVE — it cannot
+      # subtract what `globalEnv` already grants. That was measured the hard way: narrowing
+      # `test:e2e`'s task env changed nothing and this job failed twice with the identical message.
+      # Stripping them from the process that invokes turbo is what actually works.
+      #
+      # ⊕ S7: THIS STEP ALSO BUILDS `apps/web`. `test:e2e` now depends on this package's OWN `build`
+      # (see `turbo.json`), because `next start` needs a built `.next` and the Build job above is a
+      # SEPARATE RUNNER with no usable turbo remote cache — `TURBO_TOKEN` is not configured on this
+      # repository, so the remote cache no-ops. Measured when the switch was explored: the build
+      # needs no database and takes ~25 s, replacing ~5 min of in-run compilation.
+      - name: Run E2E (ar + en)
+        run: env -u MIGRATOR_DATABASE_URL -u SUPERUSER_DATABASE_URL pnpm turbo run test:e2e
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            **/playwright-report
+            **/test-results
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # 8 · deploy-staging — main only, and only once every gate above is green.
+  #
+  # Staging is NOT KSA-resident, so it stays DATA_CLASSIFICATION=fixture-only.
+  # Production deployment is deliberately absent: it is blocked on the KSA
+  # residency + PDPL review (§17).
+  # ────────────────────────────────────────────────────────────────────────────
+  deploy-staging:
+    name: Deploy → staging (Railway)
+    needs: e2e
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Staging is not KSA-resident, so it stays fixture-only.
+      DATA_CLASSIFICATION: fixture-only
+      # Lifted into env so the steps below can branch on it: the `secrets`
+      # context is not reliably available in a step-level `if`.
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard — skip cleanly when no Railway token is configured
+        if: env.RAILWAY_TOKEN == ''
+        run: echo "::notice title=Deploy skipped::RAILWAY_TOKEN is not configured for this repository. Nothing was deployed."
+
+      - name: Enable corepack
+        if: env.RAILWAY_TOKEN != ''
+        run: corepack enable
+
+      - uses: actions/setup-node@v4
+        if: env.RAILWAY_TOKEN != ''
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        if: env.RAILWAY_TOKEN != ''
+        run: pnpm install --frozen-lockfile
+
+      - name: Deploy
+        if: env.RAILWAY_TOKEN != ''
+        run: pnpm dlx @railway/cli up --service web --detach
+
+      # ⚠ STAGING'S ROLES ARE **NOT** PROVISIONED FROM CI, AND THAT IS DELIBERATE (ADR-0008 round 6).
+      #
+      # `scripts/provision-db-roles.ts` needs the PLATFORM SUPERUSER credential and it runs
+      # `REASSIGN`-equivalent `ALTER … OWNER TO` statements over every object in the schema. Putting
+      # that credential in a CI job would mean every pull-request run held a superuser connection
+      # string to staging, which is a worse exposure than the one privilege separation removes.
+      #
+      # It is therefore a ONE-TIME MANUAL step per environment, on the platform `postgres` role, and it
+      # must be written into the deploy runbook rather than assumed:
+      #
+      #   railway run --service postgres -- pnpm exec tsx scripts/provision-db-roles.ts
+      #
+      # ⚠ AND `MIGRATOR_DATABASE_URL` HAS TO EXIST IN THE RAILWAY ENVIRONMENT for the step below to
+      # migrate as the owner — while it MUST NOT exist in the web or worker service's environment.
+      # Whether Railway scopes variables per SERVICE or per ENVIRONMENT is a deployment fact this
+      # repository cannot verify; if it is per-environment, the web service inherits the owner
+      # credential and the split is weaker than the design assumes. `assertNoPrivilegedDatabaseUrls()`
+      # in `apps/web/src/instrumentation.ts` is the detector: the web service REFUSES TO BOOT if it
+      # finds it, so the misconfiguration surfaces as a failed deploy rather than as a silent
+      # regression. That is the intended failure mode. See ADR-0008's round-6 open question 7.
+      - name: Apply migrations on staging
+        if: env.RAILWAY_TOKEN != ''
+        run: pnpm dlx @railway/cli run pnpm --filter @qmulate/database run migrate:deploy

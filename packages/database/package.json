@@ -1,0 +1,53 @@
+{
+  "name": "@qmulate/database",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Prisma schema, client extensions (audit / scoping / field-encryption), migrations and the fixture-only seed for QMULATE.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./context": "./src/context.ts",
+    "./guardrail": "./src/guardrail.ts",
+    "./hash-chain": "./src/hash-chain.ts",
+    "./crypto": "./src/crypto.ts",
+    "./reserved-matter": "./src/reserved-matter.ts",
+    "./sweep-coverage": "./src/sweep-coverage.ts",
+    "./hijri": "./src/seed/hijri.ts",
+    "./seed/credentials": "./src/seed/credentials.ts",
+    "./extensions/audit": "./src/extensions/audit.ts",
+    "./extensions/scoping": "./src/extensions/scoping.ts",
+    "./extensions/encryption": "./src/extensions/encryption.ts",
+    "./seed": "./src/seed.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "prisma generate",
+    "generate": "prisma generate",
+    "migrate:dev": "tsx scripts/migrate.ts dev",
+    "migrate:deploy": "tsx scripts/migrate.ts deploy",
+    "seed": "tsx src/seed.ts",
+    "import": "tsx src/import.ts",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:integration": "vitest run --mode integration",
+    "test:guardrail": "vitest run test/residency-guardrail.test.ts test/import-guardrail.test.ts",
+    "provision:roles": "tsx ../../scripts/provision-db-roles.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.16.0",
+    "@qmulate/config": "workspace:*",
+    "@qmulate/domain": "workspace:*",
+    "decimal.js": "^10.4.3",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/pg": "^8.11.0",
+    "pg": "^8.13.0",
+    "prisma": "^6.16.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}

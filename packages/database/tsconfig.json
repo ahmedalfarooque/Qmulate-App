@@ -1,0 +1,9 @@
+{
+  "extends": "@qmulate/config/tsconfig/base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts", "prisma/**/*.ts", "test/**/*.ts", "scripts/**/*.ts", "*.config.ts"],
+  "exclude": ["node_modules", "dist", "generated"]
+}

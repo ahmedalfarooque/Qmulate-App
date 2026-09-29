@@ -1,0 +1,18 @@
+{
+  "extends": "@qmulate/config/tsconfig/base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true,
+    "types": ["node"]
+  },
+  // `test/**/*.ts` IS INCLUDED ON PURPOSE, and it is load-bearing rather than tidiness.
+  //
+  // MP-34 requires `waqfScoped(permission)`'s parameter to be REQUIRED **at the type level**
+  // ("the type system makes the check non-optional" — §10 §7.2). The only way to prove a type-level
+  // claim is to compile an assertion about it: `test/procedure-ladder.test.ts` carries
+  // `@ts-expect-error` on a zero-argument call, and TypeScript fails the build if that directive
+  // becomes UNUSED — i.e. if the parameter is ever made optional. A test file outside `include`
+  // would make that proof vacuous, because `tsc --noEmit` would never look at it.
+  "include": ["src/**/*.ts", "test/**/*.ts", "*.config.ts"],
+  "exclude": ["node_modules", "dist"]
+}

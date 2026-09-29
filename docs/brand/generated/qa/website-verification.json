@@ -1,0 +1,72 @@
+[
+  {
+    "viewport": "desktop",
+    "file": "index.html",
+    "title": "Home - QMULATE",
+    "imagesOk": true,
+    "overflow": false
+  },
+  {
+    "viewport": "desktop",
+    "file": "approach.html",
+    "title": "Approach - QMULATE",
+    "imagesOk": true,
+    "overflow": false
+  },
+  {
+    "viewport": "desktop",
+    "file": "services.html",
+    "title": "Services - QMULATE",
+    "imagesOk": true,
+    "overflow": false
+  },
+  {
+    "viewport": "desktop",
+    "file": "contact.html",
+    "title": "Contact - QMULATE",
+    "imagesOk": true,
+    "overflow": false
+  },
+  {
+    "viewport": "desktop",
+    "file": "page.html",
+    "title": "Reusable Page - QMULATE",
+    "imagesOk": true,
+    "overflow": false
+  },
+  {
+    "viewport": "mobile",
+    "file": "index.html",
+    "title": "Home - QMULATE",
+    "imagesOk": true,
+    "overflow": false
+  },
+  {
+    "viewport": "mobile",
+    "file": "approach.html",
+    "title": "Approach - QMULATE",
+    "imagesOk": true,
+    "overflow": false
+  },
+  {
+    "viewport": "mobile",
+    "file": "services.html",
+    "title": "Services - QMULATE",
+    "imagesOk": true,
+    "overflow": false
+  },
+  {
+    "viewport": "mobile",
+    "file": "contact.html",
+    "title": "Contact - QMULATE",
+    "imagesOk": true,
+    "overflow": false
+  },
+  {
+    "viewport": "mobile",
+    "file": "page.html",
+    "title": "Reusable Page - QMULATE",
+    "imagesOk": true,
+    "overflow": false
+  }
+]

@@ -1,0 +1,226 @@
+'use client';
+
+import { useLocale, useTranslations } from 'next-intl';
+import { useRouter } from 'next/navigation';
+import { useId, useState } from 'react';
+
+import type { FormEvent } from 'react';
+
+import { dashboardPath, twoFactor, useSession } from '@/lib/auth-client';
+
+/**
+ * The second factor — both halves of it, because which half you need is decided by state,
+ * not by navigation:
+ *
+ *   CHALLENGE — no session yet. The password was accepted and better-auth is holding a
+ *               pending 2FA cookie; entering the TOTP completes the sign-in.
+ *   ENROL     — a session exists but `twoFactorEnabled` is false. The user holds (or will
+ *               hold) a TOTP-mandatory seat and cannot reach the app until they enrol
+ *               (NFR-06). Enrolment needs the password again, then one verified code.
+ *
+ * The TOTP URI is rendered as text rather than a QR image: adding a QR dependency for E0
+ * buys nothing an authenticator app cannot do with a pasted `otpauth://` URI, and the
+ * secret must not be sent to any third-party QR service. A QR renderer belongs in
+ * `packages/ui` when the enrolment screen is designed properly.
+ */
+type Phase = 'challenge' | 'enrol-password' | 'enrol-verify';
+
+function isEnrolled(user: unknown): boolean {
+  return (
+    typeof user === 'object' &&
+    user !== null &&
+    (user as { twoFactorEnabled?: unknown }).twoFactorEnabled === true
+  );
+}
+
+export function TwoFactorForm() {
+  const t = useTranslations('auth');
+  const locale = useLocale();
+  const router = useRouter();
+  const codeId = useId();
+  const passwordId = useId();
+  const { data: session, isPending } = useSession();
+
+  const [password, setPassword] = useState('');
+  const [code, setCode] = useState('');
+  const [totpUri, setTotpUri] = useState<string | null>(null);
+  const [backupCodes, setBackupCodes] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setSubmitting] = useState(false);
+  const [method, setMethod] = useState<'email' | 'authenticator'>('email');
+  const [emailSent, setEmailSent] = useState(false);
+  const emailText = locale === 'ar' ? {
+    intro: 'سنرسل رمز تحقق إلى البريد الإلكتروني المسجل لحسابك.',
+    send: 'إرسال رمز إلى البريد الإلكتروني', resend: 'إعادة إرسال الرمز',
+    sent: 'تم قبول رسالة الرمز للإرسال. تحقق من بريدك والبريد غير المرغوب فيه. تنتهي صلاحيته بعد 5 دقائق.',
+    failed: 'تعذر إرسال الرمز. يجب إعداد خدمة البريد الإلكتروني أو التحقق من إعداداتها.',
+    email: 'البريد الإلكتروني', authenticator: 'تطبيق المصادقة',
+  } : {
+    intro: 'A verification code will be sent to the email address registered to your account.',
+    send: 'Send code to my email', resend: 'Resend email code',
+    sent: 'The email was accepted for delivery. Check your inbox and spam folder. The code expires in 5 minutes.',
+    failed: 'Unable to send the code. Email delivery must be configured or its settings checked.',
+    email: 'Email code', authenticator: 'Authenticator app',
+  };
+
+  async function sendCode() {
+    setError(null);
+    setSubmitting(true);
+    setEmailSent(false);
+    try {
+      const result = await twoFactor.sendOtp({});
+      if (result.error) setError(emailText.failed);
+      else setEmailSent(true);
+    } catch { setError(emailText.failed); }
+    finally { setSubmitting(false); }
+  }
+
+  let phase: Phase = 'challenge';
+  if (totpUri !== null) {
+    phase = 'enrol-verify';
+  } else if (session && !isEnrolled(session.user)) {
+    phase = 'enrol-password';
+  }
+
+  if (isPending) {
+    return (
+      <p aria-live="polite" className="qm-label">
+        {t('totpTitle')}
+      </p>
+    );
+  }
+
+  async function handleEnable(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setSubmitting(true);
+
+    const result = await twoFactor.enable({ password });
+    setSubmitting(false);
+
+    if (result.error || !result.data) {
+      setError(t('invalidCredentials'));
+      return;
+    }
+
+    setTotpUri(result.data.totpURI);
+    setBackupCodes(result.data.backupCodes);
+    setPassword('');
+  }
+
+  async function handleVerify(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setSubmitting(true);
+
+    const result = method === 'email'
+      ? await twoFactor.verifyOtp({ code })
+      : await twoFactor.verifyTotp({ code });
+    setSubmitting(false);
+
+    if (result.error) {
+      setError(t('invalidTotp'));
+      setCode('');
+      return;
+    }
+
+    router.replace(dashboardPath(locale));
+  }
+
+  return (
+    <div className="flex flex-col gap-[var(--space-16)]">
+      <div className="flex gap-[var(--space-8)]">
+        <button type="button" aria-pressed={method === 'email'} className="qm-btn" onClick={() => { setMethod('email'); setCode(''); setError(null); }}>{emailText.email}</button>
+        <button type="button" aria-pressed={method === 'authenticator'} className="qm-btn" onClick={() => { setMethod('authenticator'); setCode(''); setError(null); }}>{emailText.authenticator}</button>
+      </div>
+      {error !== null && (
+        <p role="alert" className="qm-alert-danger text-body-sm">
+          {error}
+        </p>
+      )}
+
+      {phase === 'enrol-password' && (
+        <form onSubmit={handleEnable} className="flex flex-col gap-[var(--space-16)]">
+          <p className="text-body-sm text-mist">{method === 'email' ? emailText.intro : t('totpEnrolIntro')}</p>
+          <p className="text-body-sm text-ink">{t('totpEnrolRequired')}</p>
+
+          <div className="flex flex-col gap-[var(--space-4)]">
+            <label htmlFor={passwordId} className="qm-label">
+              {t('password')}
+            </label>
+            <input
+              id={passwordId}
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              required
+              dir="ltr"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              className="qm-field"
+            />
+          </div>
+
+          <button type="submit" disabled={isSubmitting} className="qm-btn qm-btn--primary">
+            {t('submit')}
+          </button>
+        </form>
+      )}
+
+      {phase === 'enrol-verify' && totpUri !== null && (
+        <section className="flex flex-col gap-[var(--space-12)]">
+          <h2 className="text-h3">{t('totpEnrolTitle')}</h2>
+          {/* The URI is a secret. LTR island, never mirrored, never sent anywhere else. */}
+          {method === 'authenticator' && <code dir="ltr" className="qm-code-block" data-testid="qm-totp-uri">
+            {totpUri}
+          </code>}
+
+          {backupCodes.length > 0 && (
+            <div className="flex flex-col gap-[var(--space-8)]">
+              <h3 className="qm-label">{t('backupCodes')}</h3>
+              <p className="text-body-sm text-mist">{t('backupCodesWarning')}</p>
+              <ul dir="ltr" className="qm-code-block flex flex-col gap-[var(--space-4)]">
+                {backupCodes.map((backupCode) => (
+                  <li key={backupCode}>{backupCode}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
+      )}
+
+      {(phase === 'challenge' || phase === 'enrol-verify') && (
+        <form onSubmit={handleVerify} className="flex flex-col gap-[var(--space-16)]">
+          {method === 'email' && <>
+            <p className="text-body-sm">{emailText.intro}</p>
+            <button type="button" disabled={isSubmitting} className="qm-btn" onClick={() => { void sendCode(); }}>{emailSent ? emailText.resend : emailText.send}</button>
+            {emailSent && <p role="status">{emailText.sent}</p>}
+          </>}
+          <div className="flex flex-col gap-[var(--space-4)]">
+            <label htmlFor={codeId} className="qm-label">
+              {t('totpCode')}
+            </label>
+            <input
+              id={codeId}
+              name="code"
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              pattern="[0-9]{6}"
+              maxLength={6}
+              required
+              dir="ltr"
+              value={code}
+              onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))}
+              className="qm-field qm-num"
+            />
+          </div>
+
+          <button type="submit" disabled={isSubmitting} className="qm-btn qm-btn--primary">
+            {t('totpVerify')}
+          </button>
+        </form>
+      )}
+    </div>
+  );
+}

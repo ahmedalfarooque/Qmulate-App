@@ -1,0 +1,22 @@
+{
+  "name": "@qmulate/storage",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Storage interface (put/get/presign/setRetention/delete with retention-refusal semantics), an in-memory adapter that contract-implements them, and the driver factory. The exit's 'retrievable' is proven against this CONTRACT via the in-memory adapter; the S3-compatible adapter and its object-lock proof are owed to the named gate before the first client migration (owner ruling 2026-09-01, option C \u2014 was 'the S3-compatible adapter is S10/E9', which the ruling re-dated).",
+  "exports": {
+    ".": "./src/index.ts",
+    "./factory": "./src/factory.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}

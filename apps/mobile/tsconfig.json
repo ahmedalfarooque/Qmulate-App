@@ -1,0 +1,9 @@
+{
+  "extends": "@qmulate/config/tsconfig/react-library.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true
+  },
+  "include": ["App.tsx", "src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["node_modules", ".expo", "dist"]
+}

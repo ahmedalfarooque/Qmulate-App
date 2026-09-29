@@ -1,0 +1,216 @@
+/* apps/web/src/app/globals.css
+ *
+ * Load order matters and is deliberate:
+ *   1. @fontsource — the THREE brand faces, self-hosted (Option A, decided S11 2026-09-02):
+ *      Outfit Variable and Geist Mono Variable (`@fontsource-variable/*`, one file per axis —
+ *      fills the 300/500/600 and mono-500 weights the four delivered TTFs never had), and
+ *      IBM Plex Sans Arabic (static: no variable release exists upstream, so its weights are
+ *      imported individually, Arabic subset only — wired since Sprint 1).
+ *   2. @qmulate/ui tokens — the three themes (light-neu / dark-neu / flat report), the
+ *      depth tokens, and the typography layer incl. the Arabic-label treatment.
+ *   3. Tailwind's layers, generated from the same tokens via @qmulate/ui/tailwind-preset.
+ *
+ * ⚠ Nothing here or in `app/[locale]/layout.tsx` binds a `next/font` face any more: until S11 the
+ * layout bound the four delivered TTFs through `next/font/local` AND re-pointed `--font-sans` /
+ * `--font-mono` to their hashed families, so ONE family name resolved to TWO faces and the
+ * `'Outfit Variable'` lead in tokens.css was a dead word. One family per name now; the tokens'
+ * own stack is the stack. No Google Fonts request at runtime (NFR-03).
+ *
+ * No colour, shadow, radius or font is declared here that is not a token reference.
+ */
+
+/* Per-weight entry points, not per-subset: each emits one @font-face per subset with a
+   `unicode-range`, so the Arabic files download and the Latin ones do not unless a Latin
+   glyph actually renders in the Arabic face. 600 is the weight the Arabic label treatment
+   depends on (`.qm-label--ar`). */
+/* The two variable faces: one `@font-face` each with the full weight axis. */
+@import '@fontsource-variable/outfit/index.css';
+@import '@fontsource-variable/geist-mono/index.css';
+@import '@fontsource/ibm-plex-sans-arabic/400.css';
+@import '@fontsource/ibm-plex-sans-arabic/500.css';
+@import '@fontsource/ibm-plex-sans-arabic/600.css';
+@import '@fontsource/ibm-plex-sans-arabic/700.css';
+
+@import '@qmulate/ui/tokens/tokens.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* No `--font-sans` / `--font-mono` re-pointing here (S11): tokens.css's stacks lead with
+     'Outfit Variable' / 'Geist Mono Variable', which the @fontsource imports above now define. */
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: rgb(var(--color-bg));
+    color: rgb(var(--color-ink));
+    font-size: var(--fs-body);
+    line-height: var(--lh-body);
+  }
+
+  /* Deliberately NOT `overflow-x: hidden`. A mirrored layout that overflows in one
+     direction only is the classic RTL regression, and hiding it would make the
+     no-horizontal-overflow assertion in e2e/shell.spec.ts vacuous. Wide content scrolls
+     inside its own container instead. */
+
+  /* NOTE: no Arabic optical size-up here. IBM Plex Sans Arabic does run a touch small next
+     to Outfit, but DESIGN.md sets one body scale for both scripts and an app-level nudge
+     would fork the type system. If it is wanted, it belongs in the tokens, not here. */
+
+  ::selection {
+    background-color: rgb(var(--color-blue-tint));
+    color: rgb(var(--color-ink));
+  }
+}
+
+@layer components {
+  /**
+   * The skip link. Visually hidden until focused, then a raised chip in the inline-start
+   * corner — `inset-inline-start` so it lands correctly in both directions.
+   */
+  .qm-skip-link {
+    position: absolute;
+    inset-inline-start: var(--space-16);
+    inset-block-start: calc(var(--space-16) * -4);
+    z-index: var(--z-toast);
+    padding: var(--space-8) var(--space-16);
+    border: 1px solid rgb(var(--color-edge));
+    border-radius: var(--radius-sm);
+    background-color: rgb(var(--color-panel));
+    box-shadow: var(--nu-raised-sm);
+    transition: inset-block-start var(--dur-base) var(--ease);
+  }
+
+  .qm-skip-link:focus-visible {
+    inset-block-start: var(--space-16);
+  }
+
+  /**
+   * The focus ring must beat the resting depth.
+   *
+   * tokens.css declares `:focus-visible { box-shadow: var(--focus-ring) }`, but any class
+   * below that also sets `box-shadow` has equal specificity and comes later in the
+   * cascade — so it would silently win and the ring would never appear. Every primitive
+   * that carries depth therefore re-asserts the ring on focus. It is a SOLID 2px ring
+   * (DESIGN.md §11), never a soft glow, and it is additional to — not instead of — the
+   * `--color-edge` boundary each control already carries.
+   */
+  .qm-skip-link:focus-visible,
+  .qm-card:focus-visible,
+  .qm-field:focus-visible,
+  .qm-btn:focus-visible {
+    box-shadow: var(--focus-ring);
+  }
+
+  /**
+   * Shell-level primitives shared by the auth surfaces and the placeholder dashboard.
+   *
+   * These are deliberately thin: `Surface` / `Well` in `@qmulate/ui` are the real depth
+   * primitives and the only components allowed to emit a shadow. Until the component
+   * library lands, these classes compose the SAME tokens so nothing has to be unpicked —
+   * and so the flat report/print theme strips them automatically.
+   *
+   * Every interactive one carries a `--color-edge` boundary (≥3:1, WCAG 1.4.11) in
+   * addition to its depth: the shadow is never the only affordance cue.
+   */
+  .qm-card {
+    border-radius: var(--radius-lg);
+    background-color: rgb(var(--color-panel));
+    box-shadow: var(--nu-raised-md);
+    padding: var(--space-24);
+  }
+
+  .qm-field {
+    display: block;
+    inline-size: 100%;
+    min-block-size: var(--tap-min);
+    padding: var(--space-8) var(--space-12);
+    border: 1px solid rgb(var(--color-edge));
+    border-radius: var(--radius-sm);
+    background-color: rgb(var(--color-well));
+    box-shadow: var(--nu-inset);
+    color: rgb(var(--color-ink));
+  }
+
+  .qm-field::placeholder {
+    color: rgb(var(--color-mist-2));
+  }
+
+  .qm-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-8);
+    min-block-size: var(--tap-min);
+    padding-inline: var(--space-20);
+    border: 1px solid rgb(var(--color-edge));
+    border-radius: var(--radius-sm);
+    background-color: rgb(var(--color-panel));
+    box-shadow: var(--nu-raised-sm);
+    color: rgb(var(--color-ink));
+    transition:
+      box-shadow var(--dur-fast) var(--ease),
+      color var(--dur-fast) var(--ease);
+  }
+
+  /* The signature interaction: raised at rest, INSET on press. */
+  .qm-btn:active:not(:disabled) {
+    box-shadow: var(--nu-inset);
+  }
+
+  .qm-btn:disabled {
+    color: rgb(var(--color-mist-2));
+    box-shadow: var(--nu-flat);
+    cursor: not-allowed;
+  }
+
+  .qm-btn--primary {
+    background-color: rgb(var(--color-blue));
+    color: rgb(var(--color-on-info));
+    border-color: rgb(var(--color-blue-strong));
+  }
+
+  .qm-btn--primary:disabled {
+    background-color: rgb(var(--color-mist-2));
+    color: rgb(var(--color-panel));
+  }
+
+  /* Errors are inline, specific and never colour-only: dot + text, tint + border. */
+  .qm-alert-danger {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-8);
+    padding: var(--space-12);
+    border: 1px solid rgb(var(--color-danger));
+    border-radius: var(--radius-sm);
+    background-color: rgb(var(--color-danger-tint));
+    color: rgb(var(--color-ink));
+  }
+
+  .qm-alert-danger::before {
+    content: '';
+    inline-size: 0.5rem;
+    block-size: 0.5rem;
+    margin-block-start: 0.45rem;
+    flex: none;
+    border-radius: var(--radius-full);
+    background-color: rgb(var(--color-danger));
+  }
+
+  /* Secrets, URIs and codes: mono, LTR, wrapping, in an inset well. */
+  .qm-code-block {
+    display: block;
+    padding: var(--space-12);
+    border-radius: var(--radius-sm);
+    background-color: rgb(var(--color-well));
+    box-shadow: var(--nu-inset);
+    font-family: var(--font-mono);
+    font-size: var(--fs-body-sm);
+    overflow-wrap: anywhere;
+  }
+}

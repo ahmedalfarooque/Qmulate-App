@@ -1,0 +1,10 @@
+# The invented fixture keeps ONE RECORD PER LINE on purpose — a formatter pass explodes it
+# (+1076 lines measured 2026-09-02) and buries a small change in an unreviewable diff. The
+# root globs never matched `data/`, but that was a coincidence of the glob, not a rule; this is
+# the rule. Prettier honours it even for an explicitly passed path.
+data/fixtures/
+
+# Hand-aligned markdown tables and record files under docs/ are outside the root globs too; an
+# explicit pass re-aligns every table in a 500-line spec to annotate three rows (measured the same
+# day, on 09-compliance-deadline-engine-spec.md). Same rule, same reason.
+docs/

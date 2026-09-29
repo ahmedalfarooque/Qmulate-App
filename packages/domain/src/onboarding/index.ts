@@ -1,0 +1,26 @@
+export {
+  GATED_ACTIVITIES,
+  GATE_BLOCKING,
+  GATE_PREREQUISITE_CODES,
+  ONBOARDING_GATES,
+  OPERATING_MODEL_GATE_CHECKLIST,
+  clearOrderRefusal,
+  downstreamBlock,
+  gateRank,
+  isGateCleared,
+  nextGate,
+  priorGate,
+  reopenOrderRefusal,
+  unattestedChecklistItems,
+  unmetGatePrerequisites,
+} from './gates.js';
+export type {
+  DownstreamBlock,
+  GateOrderRefusal,
+  GatePrerequisiteCode,
+  GatePrerequisiteFacts,
+  GateRow,
+  GatedActivity,
+  OnboardingGate,
+  OnboardingGateStatus,
+} from './gates.js';

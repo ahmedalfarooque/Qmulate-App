@@ -1,0 +1,28 @@
+{
+  "name": "mobile",
+  "version": "0.0.0",
+  "private": true,
+  "type": "commonjs",
+  "description": "QMULATE beneficiary/client portal (Expo). Phase-2 scaffold: it typechecks and lints, and is deliberately excluded from the turbo build task (no EAS in CI).",
+  "main": "expo/AppEntry.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@qmulate/i18n": "workspace:*",
+    "expo": "^54.0.0",
+    "expo-status-bar": "^3.0.0",
+    "react": "^19.1.0",
+    "react-native": "^0.81.0"
+  },
+  "devDependencies": {
+    "@qmulate/config": "workspace:*",
+    "@types/react": "^19.1.0",
+    "babel-preset-expo": "^54.0.0",
+    "typescript": "^5.9.0"
+  }
+}

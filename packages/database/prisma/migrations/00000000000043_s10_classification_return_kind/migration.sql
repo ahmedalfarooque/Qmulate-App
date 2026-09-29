@@ -1,0 +1,50 @@
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+-- MIGRATION 43 — S10-2a · THE RESERVED-MATTER KIND THE RETURN DOOR IS GATED BY
+--
+-- **Owner ruling, 2026-08-25 (S8 addendum, FOURTH batch), verbatim selection: "Allow return,
+-- reserved-matter-gated."** Recorded at `docs/product/prd/S4-owner-decision-memo.md:550-558`, and
+-- recorded there as ⚠ **overruling the orchestrator's recommendation**. The ruling's own words:
+--
+--   "An erroneous real classification MAY return to `NOT_CLASSIFIED` via a maker≠checker
+--    reserved-matter approval (e.g. a classification entered on the wrong endowment entirely).
+--    The one-way door gains exactly this gated exception; THE DEFAULT REFUSAL STANDS FOR THE
+--    UNGATED PATH. Implementation owed: the gate, the audit shape, and the interaction with
+--    instantiated tasks (the return re-locks the register — what happens to tasks instantiated
+--    under the erroneous classification must be DESIGNED, not defaulted; engineering surfaces the
+--    shape before shipping)."
+--
+-- The task-disposition half was ruled LATER and separately — S9 addendum, second batch,
+-- 2026-08-27, "Retire with named reason": the act retires the open tasks with reason
+-- "classification returned to NOT_CLASSIFIED", rows kept, history queryable, the
+-- reclassification-retirement shape reused, and a later correct classification runs a fresh
+-- instantiation. So the fourth batch's "must be DESIGNED, not defaulted" is DISCHARGED by the
+-- second batch, and what this file implements is the GATE.
+--
+-- ── THIS FILE IS THE VOCABULARY ONLY ────────────────────────────────────────────────────────
+-- It adds ONE enum member and nothing else. The two guard changes that open the door live in
+-- their own migration, deliberately: `ALTER TYPE … ADD VALUE` and a guard that must REFUSE
+-- correctly are two different kinds of risk, and separating them means the arms of the door's
+-- positive control are measured against a schema that is already settled. Migration 30's shape:
+-- `IF NOT EXISTS` for the concurrency guarantee, safe under `migrate deploy`'s transaction on
+-- PG 12+, and the new value is NOT USED anywhere in this file.
+--
+-- ── WHY A NEW KIND RATHER THAN A BORROWED ONE ───────────────────────────────────────────────
+-- `RECEIPT_CLASS_CORRECTION`'s own schema comment states the rule and it applies unchanged here:
+-- the kind is COMPARED when an approval is spent, so borrowing one "would be a mislabelled
+-- authority, which is worse than an unlabelled one."
+--
+-- ⚠ AND THE NAME IS LONG ON PURPOSE. The tempting short form, `CLASSIFICATION_CORRECTION`, is
+-- itself the mislabel: an ORDINARY re-classification (MEDIUM → LARGE) is not reserved-matter-gated
+-- and never has been — `classification.reclassify` is a plain maker act. Only the return to the
+-- ABSENCE of a determination is gated. A kind named for "classification correction" would read as
+-- authority over both, and an approval minted for the ordinary act could then be spent on the
+-- gated one. The name names the act.
+--
+-- ── ORDER ───────────────────────────────────────────────────────────────────────────────────
+-- ⚠ Appended LAST, matching `packages/i18n`'s `code-source-parity` group for
+-- `endowments.reserved.kind`, which reads this enum from `schema.prisma` as TEXT and compares
+-- member-for-member. Member ORDER is part of that contract (migration 30's lesson, re-learned by
+-- migration 34).
+-- ═══════════════════════════════════════════════════════════════════════════════════════════
+
+ALTER TYPE "ReservedMatterKind" ADD VALUE IF NOT EXISTS 'CLASSIFICATION_RETURN_TO_NOT_CLASSIFIED';

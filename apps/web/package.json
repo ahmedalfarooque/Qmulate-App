@@ -1,0 +1,53 @@
+{
+  "name": "web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "QMULATE internal operations app \u2014 Next.js 15 App Router, Arabic-first (ar/en) light-neumorphic shell.",
+  "scripts": {
+    "dev": "next dev --port 3000",
+    "build": "next build",
+    "start": "next start --port 3000",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@fontsource-variable/geist-mono": "5.3.0",
+    "@fontsource-variable/outfit": "5.3.0",
+    "@fontsource/ibm-plex-sans-arabic": "^5.2.0",
+    "@qmulate/api": "workspace:*",
+    "@qmulate/auth": "workspace:*",
+    "@qmulate/config": "workspace:*",
+    "@qmulate/database": "workspace:*",
+    "@qmulate/i18n": "workspace:*",
+    "@qmulate/ui": "workspace:*",
+    "@tanstack/react-query": "^5.80.3",
+    "@trpc/client": "^11.0.0",
+    "@trpc/react-query": "^11.0.0",
+    "@trpc/server": "^11.0.0",
+    "better-auth": "^1.3.0",
+    "next": "^15.5.0",
+    "next-intl": "^3.26.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@next/env": "^15.5.0",
+    "@next/eslint-plugin-next": "^15.5.0",
+    "@playwright/test": "^1.55.0",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@typescript-eslint/parser": "^8.36.0",
+    "autoprefixer": "^10.4.21",
+    "eslint": "^9.30.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "globals": "^15.15.0",
+    "postcss": "^8.5.0",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}
