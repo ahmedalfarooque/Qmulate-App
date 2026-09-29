@@ -138,7 +138,7 @@ function buildAuth() {
 
     plugins: [
       twoFactor({
-        issuer: 'QMULATE',
+        issuer: 'Cumulate App',
         totpOptions: { digits: 6, period: 30 },
         otpOptions: {
           digits: 6,

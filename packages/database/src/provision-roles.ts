@@ -85,11 +85,16 @@ function credentialFromUrl(url: string, variableName: string, expectedRole: stri
   } catch {
     throw new Error(`${variableName} is not a parseable URL.`);
   }
-  const name = decodeURIComponent(parsed.username);
+  const rawName = decodeURIComponent(parsed.username);
   const password = decodeURIComponent(parsed.password);
-  if (name === '') {
+  if (rawName === '') {
     throw new Error(`${variableName} carries no username, so no role can be provisioned from it.`);
   }
+  // A connection pooler that multiplexes tenants (Supabase's Supavisor) addresses a role as
+  // `<role>.<tenant>`; the ROLE the server authenticates is still `<role>`, and that is what is
+  // provisioned. Only the canonical role name may precede the tenant suffix — anything else is
+  // refused below exactly as before.
+  const name = rawName.startsWith(`${expectedRole}.`) ? expectedRole : rawName;
   if (name !== expectedRole) {
     throw new Error(
       `${variableName} connects as "${name}", but privilege separation requires "${expectedRole}". ` +
