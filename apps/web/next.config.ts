@@ -1,7 +1,12 @@
+import { fileURLToPath } from 'node:url';
+
 import { loadEnvConfig } from '@next/env';
 import createNextIntlPlugin from 'next-intl/plugin';
 
 import type { NextConfig } from 'next';
+
+/** The monorepo root, as a filesystem path on every platform (`URL.pathname` is not one on Windows). */
+const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 
 /**
  * Next loads `.env` relative to the app directory. In this monorepo the single untracked
@@ -9,7 +14,7 @@ import type { NextConfig } from 'next';
  * reason about with a copy per app), so load it explicitly. A local `apps/web/.env*` still
  * wins, since Next processes it afterwards.
  */
-loadEnvConfig(new URL('../../', import.meta.url).pathname, process.env.NODE_ENV !== 'production');
+loadEnvConfig(repoRoot, process.env.NODE_ENV !== 'production');
 
 /**
  * The next-intl request config lives at `src/i18n/request.ts`; the path is passed
@@ -19,6 +24,13 @@ const withNextIntl = createNextIntlPlugin('./src/i18n/request.ts');
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+
+  /**
+   * Pin the workspace root. Next otherwise infers it from the OUTERMOST lockfile it can find above
+   * the app, and a stray lockfile in a home directory makes it trace (and fail on) the whole user
+   * profile. The monorepo root is the only correct answer, on a laptop and on Vercel alike.
+   */
+  outputFileTracingRoot: repoRoot,
 
   /**
    * Turborepo "Just-in-Time Packages": every `@qmulate/*` library ships TypeScript source
