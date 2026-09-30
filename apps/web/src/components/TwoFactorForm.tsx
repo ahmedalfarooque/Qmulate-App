@@ -1,7 +1,6 @@
 'use client';
 
 import { useLocale, useTranslations } from 'next-intl';
-import { useRouter } from 'next/navigation';
 import { useId, useState } from 'react';
 
 import type { FormEvent } from 'react';
@@ -38,7 +37,6 @@ function isEnrolled(user: unknown): boolean {
 export function TwoFactorForm() {
   const t = useTranslations('auth');
   const locale = useLocale();
-  const router = useRouter();
   const codeId = useId();
   const passwordId = useId();
   const { data: session, isPending } = useSession();
@@ -149,7 +147,14 @@ export function TwoFactorForm() {
       return;
     }
 
-    router.replace(dashboardPath(locale));
+    /**
+     * A full navigation, not `router.replace`: the verify response has just rotated the session
+     * cookie, and a soft navigation races the session hook's own refetch and the router's cached
+     * view of `/dashboard` (which last resolved to a redirect back here). Measured on production:
+     * a 200 from verify-otp followed by a reload of this page. A document load carries the new
+     * cookie unconditionally and lets the server gate decide from the database.
+     */
+    window.location.assign(dashboardPath(locale));
   }
 
   return (

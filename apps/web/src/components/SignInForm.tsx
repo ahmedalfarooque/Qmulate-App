@@ -2,12 +2,11 @@
 
 import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useId, useState } from 'react';
 
 import type { FormEvent } from 'react';
 
-import { dashboardPath, forgotPasswordPath, signIn, signUpPath, twoFactorPath } from '@/lib/auth-client';
+import { dashboardPath, forgotPasswordPath, signIn, signUpPath } from '@/lib/auth-client';
 
 /**
  * Email + password sign-in.
@@ -23,7 +22,6 @@ import { dashboardPath, forgotPasswordPath, signIn, signUpPath, twoFactorPath } 
 export function SignInForm() {
   const t = useTranslations('auth');
   const locale = useLocale();
-  const router = useRouter();
   const emailId = useId();
   const passwordId = useId();
 
@@ -50,7 +48,10 @@ export function SignInForm() {
       result.data !== null &&
       (result.data as { twoFactorRedirect?: unknown }).twoFactorRedirect === true;
 
-    router.replace(needsSecondFactor ? twoFactorPath(locale) : dashboardPath(locale));
+    // The two-factor client plugin already performs a document navigation to `/two-factor` on
+    // that response (`onTwoFactorRedirect`); a second, soft navigation here only races it.
+    if (needsSecondFactor) return;
+    window.location.assign(dashboardPath(locale));
   }
 
   return (
