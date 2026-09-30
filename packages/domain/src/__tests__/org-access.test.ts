@@ -88,6 +88,11 @@ describe('visibleSections', () => {
     expect(visibleSections({ seatPermissions: [], orgPermissions: ['endowment:waqf:read'] })).toEqual(['dashboard']);
   });
 
+  it('the primary administrator sees every section, seated or not', () => {
+    expect(visibleSections({ seatPermissions: [], orgPermissions: [], isPrimaryAdmin: true })).toEqual(NAV_SECTIONS.map((s) => s.key));
+    expect(visibleSections({ seatPermissions: [], orgPermissions: [], isPrimaryAdmin: false })).toEqual(['dashboard']);
+  });
+
   it('every navigation section names a registered permission or none', () => {
     for (const section of NAV_SECTIONS) {
       if (section.permission !== null) expect(isPermissionString(section.permission)).toBe(true);

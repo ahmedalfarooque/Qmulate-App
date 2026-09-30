@@ -257,6 +257,7 @@ export const appRouter = router({
     sections: visibleSections({
       seatPermissions: ctx.grants.flatMap((grant) => [...grant.permissions]),
       orgPermissions: ctx.org.permissions,
+      isPrimaryAdmin: ctx.org.status === 'ACTIVE' && ctx.org.isPrimaryAdmin,
     }),
   })),
 

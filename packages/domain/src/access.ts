@@ -382,7 +382,15 @@ export type NavSectionKey = (typeof NAV_SECTIONS)[number]['key'];
 export function visibleSections(input: {
   readonly seatPermissions: Iterable<string>;
   readonly orgPermissions: Iterable<string>;
+  /**
+   * The primary administrator (migration 55, `user.isPrimaryAdmin`) sees EVERY section: the
+   * organisation is theirs to administer whether or not they hold a seat on any endowment yet.
+   * This widens navigation only — every endowment READ still goes through the seat-scoped
+   * kernel, so an unseated primary administrator sees the sections with their empty states.
+   */
+  readonly isPrimaryAdmin?: boolean;
 }): NavSectionKey[] {
+  if (input.isPrimaryAdmin === true) return NAV_SECTIONS.map((section) => section.key);
   const seat = new Set(input.seatPermissions);
   const org = new Set(input.orgPermissions);
   return NAV_SECTIONS.filter((section) => {
