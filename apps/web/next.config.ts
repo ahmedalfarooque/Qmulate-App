@@ -18,6 +18,21 @@ const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
  */
 loadEnvConfig(repoRoot, process.env.NODE_ENV !== 'production');
 
+/** Hostnames of the comma-separated origins in BETTER_AUTH_TRUSTED_ORIGINS (invalid entries are skipped; the env schema reports them). */
+function devOriginHosts(raw: string | undefined): string[] {
+  const hosts: string[] = [];
+  for (const item of (raw ?? '').split(',')) {
+    const trimmed = item.trim();
+    if (!trimmed) continue;
+    try {
+      hosts.push(new URL(trimmed).hostname);
+    } catch {
+      /* reported by the env schema at boot */
+    }
+  }
+  return hosts;
+}
+
 /** Where `prisma generate` writes the client (schema.prisma `generator client { output }`). */
 const prismaClientDir = path.join(repoRoot, 'packages', 'database', 'generated', 'client');
 
@@ -90,6 +105,14 @@ const nextConfig: NextConfig = {
    * profile. The monorepo root is the only correct answer, on a laptop and on Vercel alike.
    */
   outputFileTracingRoot: repoRoot,
+
+  /**
+   * Hostnames allowed to load dev-server assets (HMR, `/_next/*`) from a browser that is not on
+   * `localhost` — the office-LAN address of this machine. Derived from the same variable better-auth
+   * trusts for cookie-bearing calls, so one setting makes `http://<lan-ip>:3000` a first-class way
+   * in. Ignored by `next start`/Vercel; production never serves dev assets.
+   */
+  allowedDevOrigins: devOriginHosts(process.env.BETTER_AUTH_TRUSTED_ORIGINS),
 
   /**
    * The engine that `PrismaEnginePlugin` (below) emits into `.next/server` is reached through

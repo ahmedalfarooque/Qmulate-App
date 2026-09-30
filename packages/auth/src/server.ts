@@ -20,7 +20,9 @@
 
 import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
-import { createAuthMiddleware } from 'better-auth/api';
+import { createHmac } from 'node:crypto';
+
+import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/api';
 import { twoFactor } from 'better-auth/plugins';
 
 import { serverEnv } from '@qmulate/config/env';
@@ -100,6 +102,13 @@ function buildAuth() {
     database: prismaAdapter(authPrisma, { provider: 'postgresql' }),
     baseURL: serverEnv.BETTER_AUTH_URL,
     secret: serverEnv.BETTER_AUTH_SECRET,
+    /**
+     * Origins allowed to make cookie-bearing calls besides BETTER_AUTH_URL's own. Empty in
+     * production unless a second hostname (custom domain) fronts the deployment; on a dev machine
+     * it carries the office-LAN address so `http://<lan-ip>:3000` is the same application, same
+     * database and same users as `http://localhost:3000` rather than a 403 at sign-in.
+     */
+    trustedOrigins: serverEnv.BETTER_AUTH_TRUSTED_ORIGINS,
 
     rateLimit: { enabled: rateLimit.enabled, window: rateLimit.window, max: rateLimit.max },
 
@@ -128,7 +137,39 @@ function buildAuth() {
      * is challenged exactly as before, and with the variable absent this hook is a no-op.
      */
     hooks: {
+      /**
+       * ── TOTP REPLAY GUARD ───────────────────────────────────────────────────────────────────
+       * The library verifies a TOTP against the current window only; it does not remember which
+       * code was just accepted, so the same six digits work again for up to 30 s (RFC 6238 §5.2
+       * says a verifier must not accept a code twice). Every accepted code is recorded — as an
+       * HMAC, never the digits — in the `verification` table under the user for three windows, and
+       * a second presentation is refused with the same generic error as a wrong code.
+       */
+      before: createAuthMiddleware(async (ctx) => {
+        if (ctx.path !== TOTP_VERIFY_PATH) return;
+        const code = totpCodeOf(ctx.body);
+        const userId = await totpSubject(ctx);
+        if (!code || !userId) return; // the endpoint refuses these on its own terms
+        const seen = await ctx.context.internalAdapter.findVerificationValue(totpReplayKey(userId));
+        if (seen && seen.expiresAt > new Date() && seen.value === totpReplayDigest(ctx.context.secret, userId, code)) {
+          throw APIError.from('UNAUTHORIZED', { message: 'Invalid code', code: 'INVALID_CODE' });
+        }
+      }),
       after: createAuthMiddleware(async (ctx) => {
+        if (ctx.path === TOTP_VERIFY_PATH) {
+          // A session is created (challenge) or refreshed (enrolment) only when the code verified.
+          const accepted = ctx.context.newSession;
+          const code = totpCodeOf(ctx.body);
+          if (!accepted || !code) return;
+          const key = totpReplayKey(accepted.user.id);
+          await ctx.context.internalAdapter.deleteVerificationByIdentifier(key);
+          await ctx.context.internalAdapter.createVerificationValue({
+            identifier: key,
+            value: totpReplayDigest(ctx.context.secret, accepted.user.id, code),
+            expiresAt: new Date(Date.now() + TOTP_REPLAY_TTL_MS),
+          });
+          return;
+        }
         if (ctx.path !== '/sign-in/email') return;
         const pending = ctx.context.newSession;
         if (!pending || !isDevAdminExempt(pending.user.email)) return;
@@ -156,6 +197,38 @@ function buildAuth() {
     // Session/Account/Verification/TwoFactor — so nothing would generate one and every insert
     // would fail. better-auth's own id generation is therefore left ON.
   });
+}
+
+const TOTP_VERIFY_PATH = '/two-factor/verify-totp';
+/** Three 30 s windows: the current one, the one skew still accepts, and a margin. */
+const TOTP_REPLAY_TTL_MS = 90_000;
+
+function totpCodeOf(body: unknown): string | null {
+  const code = (body as { code?: unknown } | undefined)?.code;
+  return typeof code === 'string' && /^\d{6}$/.test(code) ? code : null;
+}
+
+function totpReplayKey(userId: string): string {
+  return `totp-replay:${userId}`;
+}
+
+function totpReplayDigest(secret: string, userId: string, code: string): string {
+  return createHmac('sha256', secret).update(`${userId}:${code}`).digest('base64url');
+}
+
+/**
+ * Whose code is this? During enrolment the caller has a session; during the sign-in challenge
+ * only the signed pending-2FA cookie, whose verification row holds the user id (mirrors the
+ * library's own `verifyTwoFactor`). Unknown callers are left to the endpoint's own refusal.
+ */
+async function totpSubject(ctx: Parameters<Parameters<typeof createAuthMiddleware>[0]>[0]): Promise<string | null> {
+  const session = await getSessionFromCtx(ctx);
+  if (session) return session.user.id;
+  const cookie = ctx.context.createAuthCookie('two_factor');
+  const identifier = await ctx.getSignedCookie(cookie.name, ctx.context.secret);
+  if (!identifier) return null;
+  const pending = await ctx.context.internalAdapter.findVerificationValue(identifier);
+  return pending?.value ?? null;
 }
 
 export type Auth = ReturnType<typeof buildAuth>;

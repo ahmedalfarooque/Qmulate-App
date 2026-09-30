@@ -24,8 +24,8 @@ export function sendEmailOtp({ user, otp }: { user: { email: string }; otp: stri
   return transport.sendMail({
     from: serverEnv.SMTP_FROM,
     to: user.email,
-    subject: 'QMULATE verification code',
-    text: `Your QMULATE verification code is ${otp}. It expires in 5 minutes. Do not share this code.`,
+    subject: 'Cumulate App verification code',
+    text: `Your Cumulate App verification code is ${otp}. It expires in 5 minutes. Do not share this code.`,
   }).then((result) => {
     if (!result.accepted.length || result.rejected.length) throw new Error('Email delivery rejected.');
   }).catch(() => {

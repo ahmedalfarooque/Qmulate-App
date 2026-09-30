@@ -4,7 +4,7 @@
  * ═══════════════════════════════════════════════════════════════════════════════════════════
  * A SECOND APPROVAL AUTHORITY CREATED BY A ONE-LINE EDIT TO AN ARRAY
  * ═══════════════════════════════════════════════════════════════════════════════════════════
- * `buildAuth()` configures `plugins: [twoFactor({ issuer: 'QMULATE', totpOptions: … })]` and nothing
+ * `buildAuth()` configures `plugins: [twoFactor({ issuer: 'Cumulate App', totpOptions: … })]` and nothing
  * pinned that array. better-auth's `admin` plugin ships USER IMPERSONATION: adding it would let a
  * `SYSTEM_ADMIN` mint a session as the Nazir and approve as them — and every downstream control
  * would agree that the Nazir did it. The tRPC context would resolve the Nazir's grants, the
@@ -122,9 +122,9 @@ describe('MP-33 · the configured plugin set', () => {
   });
 
   it('keeps TOTP configured the way NFR-06 needs it', () => {
-    // The plugin that IS present has to be doing its job: a 6-digit, 30-second TOTP with the QMULATE
+    // The plugin that IS present has to be doing its job: a 6-digit, 30-second TOTP with the Cumulate App
     // issuer. `freshAge` is what a step-up assertion is measured against.
-    expect(CODE).toMatch(/twoFactor\(\s*\{[^}]*issuer:\s*'QMULATE'/);
+    expect(CODE).toMatch(/twoFactor\(\s*\{[^}]*issuer:\s*'Cumulate App'/);
     expect(CODE).toMatch(/digits:\s*6/);
     expect(CODE).toMatch(/period:\s*30/);
     expect(CODE).toMatch(/freshAge:\s*STEP_UP_FRESH_AGE_SECONDS/);

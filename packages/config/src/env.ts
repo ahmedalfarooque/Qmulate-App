@@ -119,6 +119,24 @@ function optionalPostgresUrl(name: string): z.ZodType<string | undefined> {
   ) as z.ZodType<string | undefined>;
 }
 
+/** Comma-separated origin list → trimmed entries; an unset or blank variable is an empty list. */
+function splitOrigins(raw: string | undefined): string[] {
+  return (raw ?? '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
+/** `scheme://host[:port]` and nothing else — a path, query or trailing slash is a typo, not an origin. */
+function isOrigin(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (url.protocol === 'http:' || url.protocol === 'https:') && url.origin === value;
+  } catch {
+    return false;
+  }
+}
+
 export const serverEnvSchema = z
   .object({
     // ── REQUIRED ──────────────────────────────────────────────────────────────
@@ -155,6 +173,23 @@ export const serverEnvSchema = z
 
     BETTER_AUTH_SECRET: z.string().min(32, 'BETTER_AUTH_SECRET must be at least 32 characters'),
     BETTER_AUTH_URL: z.string().url('BETTER_AUTH_URL must be an absolute URL'),
+    /**
+     * Extra browser origins allowed to call the auth API with a session cookie, comma-separated
+     * (e.g. `http://192.168.0.101:3000` for office-LAN access to a dev server, or a custom domain
+     * that fronts the same deployment). The origin of BETTER_AUTH_URL is always trusted; no
+     * wildcards. Cross-origin POSTs from anywhere else are refused (403 INVALID_ORIGIN).
+     */
+    BETTER_AUTH_TRUSTED_ORIGINS: z
+      .string()
+      .optional()
+      .transform((raw) => splitOrigins(raw))
+      .pipe(
+        z.array(
+          z.string().refine(isOrigin, {
+            message: 'BETTER_AUTH_TRUSTED_ORIGINS entries must be absolute origins (scheme://host[:port]) with no path',
+          }),
+        ),
+      ),
     SMTP_HOST: z.string().optional(),
     SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
     SMTP_USER: z.string().optional(),
