@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { loadEnvConfig } from '@next/env';
@@ -15,6 +17,63 @@ const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
  * wins, since Next processes it afterwards.
  */
 loadEnvConfig(repoRoot, process.env.NODE_ENV !== 'production');
+
+/** Where `prisma generate` writes the client (schema.prisma `generator client { output }`). */
+const prismaClientDir = path.join(repoRoot, 'packages', 'database', 'generated', 'client');
+
+/**
+ * Ship the Prisma query engine with the server bundle.
+ *
+ * The client is generated to a custom path inside `packages/database` (not `node_modules`), and
+ * `@qmulate/database` is a just-in-time transpiled package, so webpack bundles the client into
+ * `.next/server/chunks` and its `__dirname` no longer points at the folder holding the native
+ * `libquery_engine-*.so.node`. On Vercel that surfaced as `PrismaClientInitializationError:
+ * could not locate the Query Engine for runtime "rhel-openssl-3.0.x"` on the first database
+ * call (the sign-in route), after the build itself had succeeded. Prisma's runtime search list
+ * includes `.next/server`, so emitting the engine there as a webpack asset — the same mechanism
+ * as `@prisma/nextjs-monorepo-workaround-plugin`, without the dependency — makes it resolvable
+ * in the serverless function. Every `*.node` engine present is copied, so the Windows engine of
+ * a local build and the RHEL engine of a Vercel build are handled alike.
+ */
+type WebpackContext = Parameters<NonNullable<NextConfig['webpack']>>[1];
+
+/** The slice of webpack's Compiler / Compilation the plugin touches (webpack ships inside Next, untyped here). */
+interface EngineCompilation {
+  hooks: { processAssets: { tap(options: { name: string; stage: number }, fn: () => void): void } };
+  getAsset(name: string): unknown;
+  emitAsset(name: string, source: unknown): void;
+}
+interface EngineCompiler {
+  hooks: { thisCompilation: { tap(name: string, fn: (compilation: EngineCompilation) => void): void } };
+}
+
+class PrismaEnginePlugin {
+  constructor(private readonly bundler: WebpackContext['webpack']) {}
+
+  apply(compiler: EngineCompiler): void {
+    const { sources, Compilation } = this.bundler;
+    compiler.hooks.thisCompilation.tap('PrismaEnginePlugin', (compilation) => {
+      compilation.hooks.processAssets.tap(
+        { name: 'PrismaEnginePlugin', stage: Compilation.PROCESS_ASSETS_STAGE_ADDITIONAL },
+        () => {
+          if (!fs.existsSync(prismaClientDir)) {
+            throw new Error(
+              `Prisma client not generated at ${prismaClientDir}; run \`pnpm db:generate\` before \`next build\`.`,
+            );
+          }
+          for (const file of fs.readdirSync(prismaClientDir)) {
+            if (!file.endsWith('.node')) continue;
+            if (compilation.getAsset(file)) continue;
+            compilation.emitAsset(
+              file,
+              new sources.RawSource(fs.readFileSync(path.join(prismaClientDir, file))),
+            );
+          }
+        },
+      );
+    });
+  }
+}
 
 /**
  * The next-intl request config lives at `src/i18n/request.ts`; the path is passed
@@ -59,13 +118,16 @@ const nextConfig: NextConfig = {
    * Both bundlers need it: `extensionAlias` for webpack (`next build`), `resolveAlias`
    * + `resolveExtensions` for Turbopack (`next dev --turbopack`).
    */
-  webpack: (config) => {
+  webpack: (config, { isServer, webpack }) => {
     config.resolve.extensionAlias = {
       ...config.resolve.extensionAlias,
       '.js': ['.ts', '.tsx', '.js'],
       '.mjs': ['.mts', '.mjs'],
       '.cjs': ['.cts', '.cjs'],
     };
+    if (isServer) {
+      config.plugins.push(new PrismaEnginePlugin(webpack));
+    }
     return config;
   },
 
