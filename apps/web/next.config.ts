@@ -92,6 +92,14 @@ const nextConfig: NextConfig = {
   outputFileTracingRoot: repoRoot,
 
   /**
+   * The engine that `PrismaEnginePlugin` (below) emits into `.next/server` is reached through
+   * `__dirname` at runtime, so file tracing cannot see it; force it into every serverless
+   * function, or Vercel ships the bundle without it (measured: the build passed, the first
+   * sign-in failed).
+   */
+  outputFileTracingIncludes: { '/**/*': ['./.next/server/libquery_engine-*.so.node'] },
+
+  /**
    * Turborepo "Just-in-Time Packages": every `@qmulate/*` library ships TypeScript source
    * with no build step, so the app compiles them.
    */
