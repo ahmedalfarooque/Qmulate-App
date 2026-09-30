@@ -160,3 +160,6 @@ docs/product/Sharia Review Brief_answered.docx
 # Playwright web-server guard: records a dev-server memory-threshold restart for global-teardown
 # to fail the run on (root cause of the S5-S7 E2E flake class). Never committed.
 apps/web/.e2e-webserver-restart
+
+# Vercel CLI project link (per-machine; `vercel link` writes it)
+.vercel/
