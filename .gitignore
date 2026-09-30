@@ -18,6 +18,66 @@ archive/raw-intake/duplicate-downloads/
 .DS_Store
 Thumbs.db
 
+# ── AI-assistant tool state (per-developer, never part of the application) ───
+# Skill installers and coding assistants drop their own directories at the repo
+# root. None of it is source; it must not ride into the repository or a build.
+.mcp.json
+skills/
+skills-lock.json
+data/skills/
+.claude/skills/
+.adal/
+.agents/
+.aider-desk/
+.augment/
+.autohand/
+.bob/
+.codeartsdoer/
+.codebuddy/
+.codemaker/
+.codestudio/
+.commandcode/
+.continue/
+.cortex/
+.crush/
+.devin/
+.forge/
+.fx/
+.goose/
+.grok/
+.hermes/
+.iflow/
+.inferencesh/
+.jazz/
+.junie/
+.kimchi/
+.kiro/
+.kode/
+.lingma/
+.mcpjam/
+.minimax/
+.moxby/
+.mux/
+.neovate/
+.ona/
+.openhands/
+.pi/
+.pochi/
+.posit/
+.qoder/
+.qwen/
+.reasonix/
+.roo/
+.rovodev/
+.tabnine/
+.terramind/
+.tinycloud/
+.trae/
+.vibe/
+.windsurf/
+.zcode/
+.zencoder/
+
 # ── Env & secrets ────────────────────────────────────────────────────────────
 # ⚠ THE PATTERN IS `.env.*`, NOT A LIST, AND THAT IS AV7-AUD-F5's FIRST FIX.
 # This block used to read `.env` / `.env.local` / `.env.*.local`, which left
