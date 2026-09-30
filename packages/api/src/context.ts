@@ -53,6 +53,7 @@ import {
   type ActorContext,
   type ExtendedPrismaClient,
 } from '@qmulate/database';
+import { resolveOrgAccess, type OrgAccess } from '@qmulate/database';
 import { evaluateAuthGate, getServerSession, hasTotpEnrolled, type AuthGate } from '@qmulate/auth';
 import { defaultLocale, isLocale, type Locale } from '@qmulate/i18n';
 import { roleKeyFromDbRole } from '@qmulate/domain';
@@ -98,6 +99,15 @@ export type RequestLocale = Locale;
  * (§10 §7.1), never a global role on the user — and a `role` here would be the single most
  * convenient thing in the codebase for a permission check to reach for (MP-12).
  */
+/** The organisation access of a caller with no session: nothing. */
+const NO_ORG_ACCESS: OrgAccess = {
+  userId: '',
+  status: 'DISABLED',
+  isPrimaryAdmin: false,
+  accessLevel: null,
+  permissions: new Set(),
+};
+
 export interface SessionContext {
   /**
    * The `AuthGate` outcome, narrowed to the two AUTHENTICATED cases.
@@ -106,7 +116,7 @@ export interface SessionContext {
    * including read-only and portal seats. An e2e test in `apps/web/e2e/auth-journey.spec.ts` fails
    * if a role-conditional gate is reintroduced, so do NOT make this depend on the caller's roles.
    */
-  readonly status: 'authorized' | 'totp-enrolment-required';
+  readonly status: 'authorized' | 'totp-enrolment-required' | 'account-pending' | 'account-disabled';
   readonly userId: string;
   readonly email: string;
   /** better-auth two-factor enrolment state, read structurally via `hasTotpEnrolled`. */
@@ -164,7 +174,14 @@ export function resolveTotpAssertedAt(user: unknown, sessionRecord: unknown): Da
  * with no `waqfId` at all, and its own doc says it is a posture helper (MP-12).
  */
 export function sessionFromGate(gate: AuthGate, sessionRecord: unknown): SessionContext | null {
-  if (gate.status !== 'authorized' && gate.status !== 'totp-enrolment-required') return null;
+  if (
+    gate.status !== 'authorized' &&
+    gate.status !== 'totp-enrolment-required' &&
+    gate.status !== 'account-pending' &&
+    gate.status !== 'account-disabled'
+  ) {
+    return null;
+  }
 
   const user = gate.user as { id?: unknown; email?: unknown };
   const userId = typeof user.id === 'string' ? user.id : null;
@@ -315,6 +332,13 @@ export interface TrpcContext {
    * everything. There is no cached "logged-in = authorized" state (§10 §7.1).
    */
   readonly grants: readonly ResolvedGrant[];
+  /**
+   * The organisation layer (migration 55): registration state and the effective ORGANISATION-scope
+   * permission set. Resolved for every authenticated principal; an unauthenticated caller holds
+   * an empty set. Never a substitute for a grant: endowment data is still reached only through
+   * `grants`, and `orgProcedure` is the only rung that reads this.
+   */
+  readonly org: OrgAccess;
   readonly actor: AuditActor;
   /** ONE `ExtendedPrismaClient` for this request, with the caller's grants baked in. */
   readonly db: ExtendedPrismaClient;
@@ -507,6 +531,8 @@ export async function createServiceSeatContext(
     locale,
     session,
     grants,
+    // A service seat is not a person: it holds no organisation access (migration 55).
+    org: NO_ORG_ACCESS,
     actor,
     db,
     settings: createSettingReader(db),
@@ -672,8 +698,13 @@ export async function createContextForSession(
   // `authedProcedure` refuses a `totp-enrolment-required` session outright, so the set is never USED
   // in that case, and resolving it unconditionally keeps ONE code path answering "what may this
   // caller touch". An unauthenticated caller gets `[]`, and the force-filter then matches nothing.
-  const grants =
-    session === null ? [] : await resolveGrants(getBasePrismaClient(), session.userId, now);
+  const [grants, org] =
+    session === null
+      ? [[], NO_ORG_ACCESS]
+      : await Promise.all([
+          resolveGrants(getBasePrismaClient(), session.userId, now),
+          resolveOrgAccess(getBasePrismaClient(), session.userId),
+        ]);
 
   const source: ActorContextSource = {
     requestId,
@@ -693,6 +724,7 @@ export async function createContextForSession(
     locale,
     session,
     grants,
+    org,
     actor,
     db,
     settings: createSettingReader(db),

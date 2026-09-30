@@ -2,6 +2,8 @@
 
 import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
+
+import { useNavigation } from './NavigationProvider';
 import { usePathname } from 'next/navigation';
 
 /**
@@ -32,24 +34,28 @@ export const NAV_ITEMS = [
   // ⊕ S12-3b · UI intake (owner ruling "build ui intake"): a top-level entry, because a birth has
   // no endowment tab to live under. Drawn to every seat; the screen itself says who may register.
   { key: 'onboarding', segment: 'onboarding', built: true },
-  { key: 'beneficiaries', segment: 'beneficiaries', built: false },
+  // Migration 55: a cross-endowment register, composed from the seats the caller holds.
+  { key: 'beneficiaries', segment: 'beneficiaries', built: true },
   // S7/E6: the distribution run lifecycle exists — the wizard (compute → review → submit), the run
   // record and the maker/checker panel — so this destination is a real link now.
   { key: 'distributions', segment: 'distributions', built: true },
-  { key: 'compliance', segment: 'compliance', built: false },
-  { key: 'calendar', segment: 'calendar', built: false },
+  { key: 'compliance', segment: 'compliance', built: true },
+  { key: 'calendar', segment: 'calendar', built: true },
   // ⊕ S11 · 2c (E10, owner ruling 2026-09-03 "i like b"): `/financials` EXISTS as its own route,
   // so this destination is a real link now — which is the ONLY thing this file's rule permits a
   // `built: true` to mean. ⚠ Nothing in the repo GUARDS that rule (no test reads NAV_ITEMS), so it
   // is a convention held by this comment; recorded as a finding rather than claimed as a control.
   { key: 'financials', segment: 'financials', built: true },
-  { key: 'documents', segment: 'documents', built: false },
+  { key: 'documents', segment: 'documents', built: true },
   // S7/E6: the Nazir's queue exists. ⚠ IT LISTS DISTRIBUTION RUNS ONLY — there is no `approval.list`
   // procedure in the kernel, so the queue is composed from `distribution.list` per endowment plus one
   // `approval.get` per run, and a pending RESERVED_MATTER or BANK_MOVEMENT does not appear in it. That
   // is a gap owed to the API layer, recorded here because this nav item is what promises the screen.
   { key: 'approvals', segment: 'approvals', built: true },
-  { key: 'auditLog', segment: 'audit-log', built: false },
+  { key: 'auditLog', segment: 'audit-log', built: true },
+  // Migration 55: the organisation layer. Visible only with the organisation permission.
+  { key: 'users', segment: 'users', built: true },
+  { key: 'roles', segment: 'roles', built: true },
 ] as const;
 
 const ITEM_BASE = [
@@ -63,6 +69,10 @@ export function Sidebar() {
   const tCommon = useTranslations('common');
   const locale = useLocale();
   const pathname = usePathname();
+  // Visibility comes from the server-computed section list (seats + organisation permissions).
+  // Hiding an item is a courtesy, not a control: every page and procedure checks its own permission.
+  const { sections } = useNavigation();
+  const visible = new Set<string>(sections);
 
   return (
     <nav
@@ -71,9 +81,9 @@ export function Sidebar() {
       data-testid="qm-sidebar"
     >
       <ul className="flex gap-[var(--space-4)] overflow-x-auto rounded-card bg-panel p-[var(--space-8)] shadow-raised-md md:flex-col md:overflow-x-visible">
-        {NAV_ITEMS.map((item) => {
+        {NAV_ITEMS.filter((item) => visible.has(item.key)).map((item) => {
           const href = `/${locale}/${item.segment}`;
-          const isActive = item.built && pathname === href;
+          const isActive = item.built && (pathname === href || pathname.startsWith(`${href}/`));
 
           if (!item.built) {
             return (

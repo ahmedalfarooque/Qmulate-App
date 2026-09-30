@@ -531,6 +531,15 @@ export const DOMAIN_WRITE_UNGATED: Readonly<Record<string, string>> = {
   User:
     'The staff directory / better-auth user record. Provisioning a seat is E11 (and the AUTHORITY ' +
     'a seat carries is `WaqfAccessGrant`, which IS gated).',
+  AccessLevel:
+    'Organisation-wide, above every endowment (migration 55) — no §3 row applies. A write is gated ' +
+    'OUTSIDE this extension: `orgProcedure("admin:access_level:write")` on the API, the ' +
+    'provisioning connection (the runtime role holds SELECT only), and `access_level_guard` in the ' +
+    'database (system levels keep their key and cannot be deleted).',
+  UserPermissionOverride:
+    'Organisation-wide per-user ALLOW/DENY (migration 55). Same gate as AccessLevel: ' +
+    '`orgProcedure("admin:user:write")`, provisioning connection only, and DELETE revoked from ' +
+    'every application role — withdrawal stamps `deletedAt`.',
   Session: 'better-auth session store.',
   Account: 'better-auth credential records.',
   Verification: 'better-auth one-time tokens.',
@@ -786,6 +795,12 @@ export const UNSCOPED_MODELS: Record<string, string> = {
   Account: 'better-auth credential/provider records. Never surfaced through the domain API.',
   Verification: 'better-auth one-time tokens. Short-lived; never surfaced.',
   TwoFactor: 'better-auth TOTP secrets and backup codes. Never surfaced.',
+  AccessLevel:
+    'The organisation-wide access levels (migration 55): configuration rows, no endowment data. ' +
+    'Read by any authenticated caller for navigation; written only on the provisioning connection.',
+  UserPermissionOverride:
+    'Per-user organisation-scope ALLOW/DENY rows (migration 55). No endowment data; written only on ' +
+    'the provisioning connection through the audited admin path.',
 };
 
 /** Every model in `schema.prisma`. Kept explicit so coverage is reviewable in a diff. */
@@ -821,6 +836,8 @@ export const ALL_MODELS = [
   'LegalCase',
   'ZakatFiling',
   'User',
+  'AccessLevel',
+  'UserPermissionOverride',
   'Session',
   'Account',
   'Verification',

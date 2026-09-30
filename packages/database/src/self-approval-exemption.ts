@@ -10,7 +10,7 @@
  * distribution executor, the segregation rung) call the reader so they agree with the CHECK
  * constraint instead of refusing a row the database would accept.
  *
- * The writer exists for ONE caller — `packages/auth/src/dev-admin-setup.ts`, a provisioning
+ * The writer exists for ONE caller — `packages/auth/scripts/dev-admin-setup.ts`, a provisioning
  * program that refuses to start outside `DATA_CLASSIFICATION=fixture-only`. It is raw SQL over a
  * dedicated connection, deliberately: the fact lives in the catalog, has no Prisma model, and is
  * written with a privilege no application connection holds.

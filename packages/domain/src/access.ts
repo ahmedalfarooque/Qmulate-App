@@ -225,8 +225,12 @@ export const PERMISSION_RESOURCES: Readonly<Record<PermissionModule, readonly st
    * artifact; `report` is the aggregate the grid denies beneficiaries.
    */
   reporting: ['report', 'statement'],
-  /** §3 row 11 "Admin / access matrix". `setting` is the configuration plane (EXIT-3). */
-  admin: ['access_matrix', 'setting'],
+  /**
+   * §3 row 11 "Admin / access matrix". `setting` is the configuration plane (EXIT-3). `user` and
+   * `access_level` are the ORGANISATION layer (migration 55): user management and the editable
+   * access levels. They carry no endowment scope — see {@link ORG_SCOPE_PERMISSIONS}.
+   */
+  admin: ['access_matrix', 'setting', 'user', 'access_level'],
   /** §3 row 12 "Audit trail" (BR-607, NFR-04) — append-only; there is no write verb granted anywhere. */
   audit: ['event'],
   /** No grid row — the ApprovalRequest record itself (§4). Only `nazir` approves on it. */
@@ -261,6 +265,132 @@ export const GRID_ROW_TO_MODULE: Readonly<Record<string, PermissionModule>> = {
  * rather than quietly skipping whatever it cannot match.
  */
 export const MODULES_WITHOUT_GRID_ROW = ['approval'] as const;
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════
+ * The organisation layer (migration 55)
+ * ═══════════════════════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * Permissions an ACCESS LEVEL may confer ORGANISATION-WIDE, i.e. with no endowment in the
+ * sentence: managing users and levels, seating people on endowments, the configuration plane,
+ * and reading the audit trail. Everything else in this file is a per-endowment permission and
+ * is reached only through a `WaqfAccessGrant` on that endowment. The list is closed: an
+ * endowment permission written into a level is rejected by {@link assertOrgScopePermissions}.
+ *
+ * ⚠ No approval verb appears here, and none may be added: approve/sign belong to the Nazir seat
+ * on the endowment (ADR-0004, BR-105).
+ */
+export const ORG_SCOPE_PERMISSIONS = [
+  'admin:user:read',
+  'admin:user:write',
+  'admin:access_level:read',
+  'admin:access_level:write',
+  'admin:access_matrix:read',
+  'admin:access_matrix:write',
+  'admin:setting:read',
+  'admin:setting:write',
+  'audit:event:read',
+] as const;
+
+export type OrgScopePermission = (typeof ORG_SCOPE_PERMISSIONS)[number];
+
+const ORG_SCOPE_SET: ReadonlySet<string> = new Set(ORG_SCOPE_PERMISSIONS);
+
+export function isOrgScopePermission(value: string): value is OrgScopePermission {
+  return ORG_SCOPE_SET.has(value);
+}
+
+/** Throws unless every entry is a registered organisation-scope permission. */
+export function assertOrgScopePermissions(values: readonly string[]): OrgScopePermission[] {
+  const bad = values.filter((value) => !isOrgScopePermission(value));
+  if (bad.length > 0) {
+    throw new Error(
+      `not organisation-scope permissions: ${bad.join(', ')}. A level confers only ` +
+        `${ORG_SCOPE_PERMISSIONS.join(', ')}; endowment access is a seat on that endowment.`,
+    );
+  }
+  return [...new Set(values)] as OrgScopePermission[];
+}
+
+/** The five default level keys. Rows in `access_level`; the keys are stable, the contents are not. */
+export const ACCESS_LEVEL_KEYS = ['ADMIN', 'OWNER', 'MANAGER', 'USER', 'CUSTOM'] as const;
+export type AccessLevelKey = (typeof ACCESS_LEVEL_KEYS)[number];
+
+/** Registration state of an account (mirrors the `UserStatus` enum). */
+export const USER_STATUSES = ['PENDING_APPROVAL', 'ACTIVE', 'DISABLED', 'REJECTED'] as const;
+export type UserStatus = (typeof USER_STATUSES)[number];
+
+export interface OrgAccessInput {
+  readonly status: UserStatus;
+  readonly isPrimaryAdmin: boolean;
+  readonly levelPermissions: readonly string[];
+  readonly overrides: readonly { readonly permission: string; readonly effect: 'ALLOW' | 'DENY' }[];
+}
+
+/**
+ * The effective ORGANISATION-SCOPE permission set of an account — the TypeScript twin of the SQL
+ * function `qmulate_actor_holds_org_permission` (migration 55), and a test compares the two.
+ *
+ * Order: an account that is not ACTIVE holds nothing; the primary administrator holds every
+ * organisation permission (that is what makes it un-lockable); a DENY override beats the level;
+ * an ALLOW override adds to it. Only registered organisation-scope strings survive.
+ */
+export function resolveOrgPermissions(input: OrgAccessInput): ReadonlySet<OrgScopePermission> {
+  if (input.status !== 'ACTIVE') return new Set();
+  if (input.isPrimaryAdmin) return new Set(ORG_SCOPE_PERMISSIONS);
+  const denied = new Set(input.overrides.filter((o) => o.effect === 'DENY').map((o) => o.permission));
+  const allowed = new Set<string>([
+    ...input.levelPermissions,
+    ...input.overrides.filter((o) => o.effect === 'ALLOW').map((o) => o.permission),
+  ]);
+  const result = new Set<OrgScopePermission>();
+  for (const permission of allowed) {
+    if (!denied.has(permission) && isOrgScopePermission(permission)) result.add(permission);
+  }
+  return result;
+}
+
+/**
+ * The navigation sections of the product and the permission that makes each one VISIBLE. This is
+ * the one place the sidebar and the route gates read from; a section without a row is not shown.
+ * `scope: 'seat'` means "any active grant carrying this permission on any endowment";
+ * `scope: 'org'` means the organisation-scope permission. Visibility is not authority: every API
+ * procedure behind a section still checks its own permission on its own endowment.
+ */
+export const NAV_SECTIONS = [
+  { key: 'dashboard', scope: 'any', permission: null },
+  { key: 'endowments', scope: 'seat', permission: 'endowment:waqf:read' },
+  { key: 'onboarding', scope: 'seat', permission: 'endowment:waqf:write' },
+  { key: 'beneficiaries', scope: 'seat', permission: 'beneficiary:beneficiary:read' },
+  { key: 'distributions', scope: 'seat', permission: 'distribution:run:read' },
+  { key: 'compliance', scope: 'seat', permission: 'compliance:task:read' },
+  { key: 'calendar', scope: 'seat', permission: 'compliance:task:read' },
+  { key: 'financials', scope: 'seat', permission: 'finance:transaction:read' },
+  { key: 'documents', scope: 'seat', permission: 'document:document:read' },
+  { key: 'approvals', scope: 'seat', permission: 'approval:request:read' },
+  { key: 'auditLog', scope: 'org', permission: 'audit:event:read' },
+  { key: 'users', scope: 'org', permission: 'admin:user:read' },
+  { key: 'roles', scope: 'org', permission: 'admin:access_level:read' },
+] as const;
+
+export type NavSectionKey = (typeof NAV_SECTIONS)[number]['key'];
+
+/**
+ * Which sections a caller may see, from their seats and their organisation permissions.
+ * Pure, so the sidebar, the route gates and the tests all compute the same answer.
+ */
+export function visibleSections(input: {
+  readonly seatPermissions: Iterable<string>;
+  readonly orgPermissions: Iterable<string>;
+}): NavSectionKey[] {
+  const seat = new Set(input.seatPermissions);
+  const org = new Set(input.orgPermissions);
+  return NAV_SECTIONS.filter((section) => {
+    if (section.scope === 'any') return true;
+    if (section.scope === 'seat') return seat.has(section.permission);
+    return org.has(section.permission);
+  }).map((section) => section.key);
+}
 
 /**
  * A permission: `module:resource:verb`.

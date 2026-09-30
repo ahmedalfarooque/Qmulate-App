@@ -60,6 +60,7 @@
  *     a decimal string — no serializer is quietly turning a Decimal into a float.
  */
 
+import { isOrgScopePermission, type OrgScopePermission } from '@qmulate/domain/access';
 import { initTRPC } from '@trpc/server';
 
 import { ApiError, isNonDisclosureCode, NON_DISCLOSURE_WIRE_CODE, toTRPCError } from './errors.js';
@@ -225,6 +226,33 @@ export const authedProcedure = tagLast(
   t.procedure.use(normaliseErrors).use(async ({ ctx, next }) => next({ ctx: assertAuthed(ctx) })),
   { kind: 'authed' },
 );
+
+/**
+ * Rung 2-org. An ORGANISATION-scope permission (migration 55): user management, access levels,
+ * seating people on endowments, the configuration plane, the audit trail. No `waqfId` in the
+ * sentence, because the authority is not about an endowment. The permission must be one of
+ * `ORG_SCOPE_PERMISSIONS`, checked at router construction; the decision reads `ctx.org`, which
+ * `createContextForSession` resolved from the database on this request. A refusal is
+ * `ORG_PERMISSION_DENIED` (FORBIDDEN): being signed in already discloses the organisation exists.
+ */
+export function orgProcedure(permission: OrgScopePermission) {
+  if (!isOrgScopePermission(permission)) {
+    throw new Error(`orgProcedure: "${permission}" is not an organisation-scope permission`);
+  }
+  return tagLast(
+    authedProcedure.use(async ({ ctx, next }) => {
+      if (!ctx.org.permissions.has(permission)) {
+        throw new ApiError(
+          'ORG_PERMISSION_DENIED',
+          `the caller's access level does not carry "${permission}".`,
+          { userId: ctx.session.userId, permission },
+        );
+      }
+      return next({ ctx });
+    }),
+    { kind: 'org-scope', permission },
+  );
+}
 
 /**
  * Rung 2. §17's spelling.

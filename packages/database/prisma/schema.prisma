@@ -2493,6 +2493,18 @@ model User {
   // ── QMULATE domain fields ────────────────────────────────────────────────
   locale           String   @default("ar")
   isActive         Boolean  @default(true)
+  // ── Organisation layer (migration 55) ────────────────────────────────────
+  /// Registration state. New rows start PENDING_APPROVAL by column default; an administrator
+  /// approves, rejects, disables or reactivates on the audited provisioning connection only.
+  status          UserStatus @default(PENDING_APPROVAL)
+  /// The account that can never be locked out: the database refuses to demote, disable or delete
+  /// the last ACTIVE primary administrator (`user_last_primary_admin_guard`).
+  isPrimaryAdmin  Boolean    @default(false)
+  accessLevelId   String?
+  accessLevel     AccessLevel? @relation(fields: [accessLevelId], references: [id], onDelete: Restrict)
+  statusChangedAt DateTime?
+  statusReason    String?
+  permissionOverrides UserPermissionOverride[]
 
   sessions      Session[]
   accounts      Account[]
@@ -2504,7 +2516,56 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([status])
+  @@index([accessLevelId])
   @@map("user")
+}
+
+/// Registration state of an account (migration 55).
+enum UserStatus {
+  PENDING_APPROVAL
+  ACTIVE
+  DISABLED
+  REJECTED
+}
+
+/// An organisation-wide access level (ADMIN, OWNER, MANAGER, USER, CUSTOM, …): editable data,
+/// not code. `permissions` are ORGANISATION-SCOPE `module:resource:verb` strings, effective
+/// everywhere; `seatRole`/`seatPermissions` are the template an administrator issues when seating
+/// a holder of this level on an endowment. Endowment data is still reached only through a grant.
+model AccessLevel {
+  id              String   @id
+  key             String   @unique
+  nameEn          String
+  nameAr          String
+  permissions     String[] @default([])
+  seatRole        Role?
+  seatPermissions String[] @default([])
+  isSystem        Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @default(now())
+  createdBy       String?
+
+  users User[]
+
+  @@map("access_level")
+}
+
+/// A per-user ALLOW / DENY on one organisation-scope permission, on top of the level.
+model UserPermissionOverride {
+  id         String   @id
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission String
+  effect     String
+  createdAt  DateTime @default(now())
+  createdBy  String?
+  /// Withdrawn overrides are stamped, never deleted (the audit spine refuses hard deletes).
+  deletedAt  DateTime?
+
+  @@unique([userId, permission])
+  @@index([userId])
+  @@map("user_permission_override")
 }
 
 model Session {

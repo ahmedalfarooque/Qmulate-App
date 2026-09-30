@@ -140,6 +140,8 @@ export const GUARD_KINDS = [
   'segregation',
   /** a fresh TOTP assertion inside the Setting-driven window (NFR-06 step-up, D-6). */
   'totp-step-up',
+  /** an ORGANISATION-scope permission held through the caller's access level (migration 55). */
+  'org-scope',
   /** AML compartment membership for the target endowment (§10 §6). May only BLOCK. */
   'aml-member',
 ] as const;

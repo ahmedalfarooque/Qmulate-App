@@ -665,7 +665,7 @@ function readSources(): Map<string, string> {
   const files = sourceFiles();
   const map = new Map<string, string>();
   for (const file of files) {
-    map.set(path.relative(SRC_DIR, file), readFileSync(file, 'utf8'));
+    map.set(path.relative(SRC_DIR, file).split(path.sep).join('/'), readFileSync(file, 'utf8'));
   }
   return map;
 }
@@ -698,7 +698,7 @@ describe('source scans over packages/api/src', () => {
       path.join('middleware', 'aml.ts'),
       path.join('middleware', 'audit.ts'),
     ]) {
-      expect(sources.has(expected), `${expected} was not scanned`).toBe(true);
+      expect(sources.has(expected.split(path.sep).join('/')), `${expected} was not scanned`).toBe(true);
     }
   });
 

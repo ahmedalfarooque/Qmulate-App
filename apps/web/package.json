@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "QMULATE internal operations app \u2014 Next.js 15 App Router, Arabic-first (ar/en) light-neumorphic shell.",
+  "description": "QMULATE internal operations app — Next.js 15 App Router, Arabic-first (ar/en) light-neumorphic shell.",
   "scripts": {
     "dev": "next dev --port 3000",
     "build": "next build",
@@ -23,6 +23,8 @@
     "@qmulate/database": "workspace:*",
     "@qmulate/i18n": "workspace:*",
     "@qmulate/ui": "workspace:*",
+    "@supabase/server": "^1.8.1",
+    "@supabase/supabase-js": "^2.117.2",
     "@tanstack/react-query": "^5.80.3",
     "@trpc/client": "^11.0.0",
     "@trpc/react-query": "^11.0.0",

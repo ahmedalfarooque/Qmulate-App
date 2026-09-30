@@ -68,6 +68,20 @@ export function assertAuthed(ctx: TrpcContext): AuthedContext {
     );
   }
 
+  if (session.status === 'account-pending') {
+    throw new ApiError(
+      'ACCOUNT_PENDING',
+      'the account is registered and enrolled but no administrator has approved it yet (migration 55).',
+      { userId: session.userId },
+    );
+  }
+
+  if (session.status === 'account-disabled') {
+    throw new ApiError('ACCOUNT_DISABLED', 'the account is disabled or was rejected by an administrator.', {
+      userId: session.userId,
+    });
+  }
+
   if (session.status !== 'authorized') {
     throw new ApiError(
       'GATE_NOT_CLEARED',

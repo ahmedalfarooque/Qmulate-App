@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import { evaluateAuthGate } from '@qmulate/auth';
 
 import { ACCESS_KEY_PREFIX, kernelMessageKey } from '@/lib/trpc/client';
+import { NavigationProvider } from '@/components/NavigationProvider';
 import { TrpcProvider } from '@/lib/trpc/provider';
 import { getServerCaller } from '@/lib/trpc/server';
 
@@ -57,46 +58,75 @@ export default async function AppLayout({
   const gate = await evaluateAuthGate(await headers());
   if (gate.status === 'unauthenticated') redirect(`/${locale}/sign-in`);
   if (gate.status === 'totp-enrolment-required') redirect(`/${locale}/two-factor`);
+  // Migration 55: the registration state is told in its own words, not as a missing record.
+  if (gate.status === 'account-pending') return <AccountStateNotice locale={locale} state="pending" />;
+  if (gate.status === 'account-disabled') return <AccountStateNotice locale={locale} state="disabled" />;
 
   /**
    * ONE kernel call, through the SAME router and middleware chain the HTTP boundary uses. A refusal
    * is caught rather than allowed to become a 500: an unauthorized caller is an expected state, and
    * an error page would leak "something went wrong" where the right answer is "you have no access".
    */
-  let authorizedEndowments = 0;
+  let identity: Awaited<ReturnType<Awaited<ReturnType<typeof getServerCaller>>['whoami']>> | null = null;
   let refusal: unknown = null;
   try {
     const caller = await getServerCaller(locale);
-    authorizedEndowments = (await caller.whoami()).grants.length;
+    identity = await caller.whoami();
   } catch (error) {
     refusal = error;
   }
 
-  if (refusal === null && authorizedEndowments > 0) {
-    return <TrpcProvider locale={locale}>{children}</TrpcProvider>;
+  if (refusal === null && identity !== null) {
+    // Seated on at least one endowment, or holding an organisation permission (Users / Roles /
+    // Audit Log): the shell is theirs. Which items appear is decided by `identity.sections`.
+    if (identity.grants.length > 0 || identity.org.permissions.length > 0) {
+      return (
+        <NavigationProvider
+          value={{
+            sections: identity.sections,
+            isPrimaryAdmin: identity.org.isPrimaryAdmin,
+            accessLevelKey: identity.org.accessLevel?.key ?? null,
+          }}
+        >
+          <TrpcProvider locale={locale}>{children}</TrpcProvider>
+        </NavigationProvider>
+      );
+    }
+    // Approved, enrolled, and not yet seated anywhere: say exactly that.
+    return <AccountStateNotice locale={locale} state="no-seat" />;
   }
 
-  /**
-   * ⚠ EVERY KEY THAT REACHES THE NOTICE GOES THROUGH `kernelMessageKey`, INCLUDING THE ONE THIS FILE
-   * PROPOSES ITSELF.
-   *
-   * `whoami` does not throw for a caller who simply has no grant — it answers `grants: []`, which is
-   * the correct answer — so the zero-grant refusal is the UI's own conclusion (§10 principle 1) and
-   * there is no kernel error to read a key off. It would be easy to hand `AccessNotice` a literal key
-   * in that case; routing it through the same validator instead makes the choke point UNIVERSAL
-   * rather than conditional. The practical consequence: a typo'd or renamed code degrades to the
-   * generic sentence instead of printing `errors.access.WHATEVER` on a Family Board member's screen,
-   * because next-intl does not throw for a missing message — it prints the key.
-   *
-   * The key is assembled from the exported prefix, not spelled out, so a namespace rename is a
-   * compile-time concern rather than a silent 404 in the catalogue.
-   */
   const messageKey = kernelMessageKey(
     refusal ?? { messageKey: `${ACCESS_KEY_PREFIX}NO_GRANT` },
     locale,
   );
 
   return <AccessNotice locale={locale} messageKey={messageKey} />;
+}
+
+/**
+ * The three ACCOUNT states (migration 55), each in its own words. These are not record refusals
+ * and carry no non-disclosure duty: the person is talking about their own account.
+ */
+async function AccountStateNotice({ locale, state }: { locale: string; state: 'pending' | 'disabled' | 'no-seat' }) {
+  const t = await getTranslations({ locale, namespace: 'account' });
+  const tCommon = await getTranslations({ locale, namespace: 'common' });
+  return (
+    <main
+      id="qm-main"
+      data-testid="qm-account-state"
+      data-state={state}
+      className="mx-auto flex min-h-[100dvh] w-full max-w-product flex-col justify-center gap-[var(--space-16)] px-[var(--space-16)] py-[var(--space-24)] text-start"
+    >
+      <p className="qm-label">{tCommon('appName')}</p>
+      <h1 className="text-h2 text-ink">{t(`${state}.title`)}</h1>
+      <p className="text-body text-mist">{t(`${state}.body`)}</p>
+      <form action={`/api/auth/sign-out`} method="post" className="hidden" />
+      <a href={`/${locale}/sign-in`} className="text-body-sm text-blue-strong underline">
+        {t('backToSignIn')}
+      </a>
+    </main>
+  );
 }
 
 /**

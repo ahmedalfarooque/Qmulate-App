@@ -102,6 +102,19 @@ function buildAuth() {
     database: prismaAdapter(authPrisma, { provider: 'postgresql' }),
     baseURL: serverEnv.BETTER_AUTH_URL,
     secret: serverEnv.BETTER_AUTH_SECRET,
+
+    /**
+     * The organisation columns (migration 55) surface on the session user so the gate can read
+     * them. `input: false` on every one: a caller can never set them through sign-up or update;
+     * they are written only on the provisioning connection, and the database refuses otherwise.
+     */
+    user: {
+      additionalFields: {
+        status: { type: 'string', input: false },
+        isPrimaryAdmin: { type: 'boolean', input: false },
+        accessLevelId: { type: 'string', input: false, required: false },
+      },
+    },
     /**
      * Origins allowed to make cookie-bearing calls besides BETTER_AUTH_URL's own. Empty in
      * production unless a second hostname (custom domain) fronts the deployment; on a dev machine
@@ -131,8 +144,15 @@ function buildAuth() {
       expiresIn: 60 * 60,
       // Sign-up must never fail because the mail did not go out: the link can be re-requested
       // from an authenticated session (`/send-verification-email`), where a failure IS reported.
-      sendVerificationEmail: ({ user, url }) =>
-        sendAddressVerificationEmail({ user, url }).catch(() => undefined),
+      sendVerificationEmail: async ({ user, url }) => {
+        try {
+          await sendAddressVerificationEmail({ user, url });
+        } catch {
+          // Unconfigured transport (throws synchronously) or a provider refusal: registration
+          // proceeds; the link is re-requested from an authenticated session, where a failure IS
+          // reported.
+        }
+      },
     },
 
     session: {
@@ -392,7 +412,19 @@ export async function userRequiresTotpEnrolment(userId: string): Promise<boolean
 export type AuthGate =
   | { status: 'unauthenticated' }
   | { status: 'totp-enrolment-required'; user: AuthUser }
+  /** Registered and enrolled, but no administrator has approved the account yet (migration 55). */
+  | { status: 'account-pending'; user: AuthUser }
+  /** Disabled or rejected by an administrator: authenticated, refused everywhere. */
+  | { status: 'account-disabled'; user: AuthUser }
   | { status: 'authorized'; user: AuthUser; roles: RoleKey[] };
+
+/** The registration state on a session user, read structurally; an unknown value is NOT active. */
+export function accountStatusOf(user: unknown): 'PENDING_APPROVAL' | 'ACTIVE' | 'DISABLED' | 'REJECTED' {
+  const value = typeof user === 'object' && user !== null ? (user as { status?: unknown }).status : undefined;
+  return value === 'ACTIVE' || value === 'PENDING_APPROVAL' || value === 'DISABLED' || value === 'REJECTED'
+    ? value
+    : 'DISABLED';
+}
 
 /**
  * The single gate every authenticated surface calls.
@@ -431,6 +463,12 @@ export async function evaluateAuthGate(headers: Headers): Promise<AuthGate> {
   if (!hasTotpEnrolled(user) && !isDevAdminExempt(user.email)) {
     return { status: 'totp-enrolment-required', user };
   }
+
+  // The registration state (migration 55), after the second factor: enrolling is part of
+  // registering, and an unvetted account is told it is waiting, not that it is refused.
+  const status = accountStatusOf(user);
+  if (status === 'PENDING_APPROVAL') return { status: 'account-pending', user };
+  if (status !== 'ACTIVE') return { status: 'account-disabled', user };
 
   return { status: 'authorized', user, roles: await getUserRoleKeys(user.id) };
 }

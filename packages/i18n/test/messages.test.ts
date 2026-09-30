@@ -102,6 +102,10 @@ const EXPECTED_NAMESPACES = [
    * (ENGINEERING_AR_OWED_TO_REVIEW) — staff-facing vocabulary only, never beneficiary text.
    */
   'financials',
+  // ⊕ migration 55 · the organisation layer: the account-state notices and the Users / Roles /
+  // Audit screens. Staff-facing vocabulary, engineering's rendering, owed to the copy review.
+  'account',
+  'admin',
 ] as const;
 
 /** The ten sidebar destinations from the AppShell contract, in their rendered order. */
@@ -250,7 +254,7 @@ describe('catalogue structure', () => {
     expect(Object.keys(messages).sort()).toEqual(['ar', 'en']);
   });
 
-  it('declares the same six namespaces, in the same order, in both locales', () => {
+  it('declares the same namespaces, in the same order, in both locales', () => {
     expect(Object.keys(ar)).toEqual([...EXPECTED_NAMESPACES]);
     expect(Object.keys(en)).toEqual([...EXPECTED_NAMESPACES]);
   });
@@ -363,7 +367,7 @@ describe('value hygiene', () => {
  */
 const LATIN_ALLOWED_IN_ARABIC: Readonly<Record<string, string>> = {
   // The brand mark is a wordmark. It is never transliterated — DESIGN.md §3.
-  'common.appName': 'QMULATE',
+  'common.appName': 'Cumulate App',
   // The language switcher writes each language in its OWN script, so the reader can find
   // their language without already being able to read the other one.
   'common.languageEn': 'English',
@@ -456,7 +460,7 @@ describe('en.json', () => {
   });
 
   it('leaves the brand mark untranslated', () => {
-    expect(en.common).toMatchObject({ appName: 'QMULATE' });
+    expect(en.common).toMatchObject({ appName: 'Cumulate App' });
   });
 });
 

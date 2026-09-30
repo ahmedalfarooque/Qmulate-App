@@ -113,6 +113,17 @@ build** (the build has no owner credential by design). Run it from CI or an oper
 `MIGRATOR_DATABASE_URL` pointing at the session pooler; the Prisma client is generated during the
 Vercel build from the schema alone.
 
+### Deploying a schema change
+
+`git push origin main` builds and deploys the web app on Vercel, but it does **not** migrate the
+database (the build holds no owner credential by design). Apply migrations from an operator
+machine before or right after the deploy, then verify:
+
+```bash
+pnpm exec cross-env-shell "MIGRATOR_DATABASE_URL=$MIGRATOR_DATABASE_URL pnpm --filter @qmulate/database run migrate:deploy"
+pnpm --filter @qmulate/database exec tsx scripts/migrate.ts status
+```
+
 ### Bootstrapping seats
 
 Authority cannot authorise its own first instance: the first `admin:access_matrix:write` seat is
@@ -120,6 +131,38 @@ laid down on the owner connection. On a fixture-only environment that is the det
 (`pnpm run db:seed`, exactly as CI staging does); on a KSA production environment it is the
 importer. Real users then sign up, enrol TOTP, and are seated through `grant.activate` by an
 established administrator.
+
+## The organisation layer: registration, access levels, the primary administrator (migration 55)
+
+Endowment data is reached only through a per-endowment seat (`waqf_access_grant`), exactly as
+before. Above it sits an organisation layer, stored as data:
+
+| Piece | Where | Meaning |
+|---|---|---|
+| `user.status` | `user` | `PENDING_APPROVAL` (every new sign-up) → `ACTIVE` / `REJECTED` / `DISABLED`, decided by an administrator |
+| `user.isPrimaryAdmin` | `user` | the account the database will never let be demoted, disabled or deleted while it is the last active one |
+| `access_level` | table | ADMIN, OWNER, MANAGER, USER, CUSTOM (+ any created later): organisation-scope permissions and the seat template issued when its holders are seated |
+| `user_permission_override` | table | per-user ALLOW / DENY on one organisation permission, on top of the level (withdrawn rows are stamped, never deleted) |
+
+Organisation-scope permissions are the closed list in `ORG_SCOPE_PERMISSIONS`
+(`packages/domain/src/access.ts`): user management, levels, seating, settings, the audit trail. No
+approval verb can be written into a level — approve/sign stay with the Nazir seat (ADR-0004,
+BR-105). The database evaluates the same rule (`qmulate_actor_holds_org_permission`) that the API
+evaluates (`resolveOrgPermissions`), and the grant-admission trigger accepts an organisation-wide
+`admin:access_matrix:write` holder as an issuer; nobody may seat themselves.
+
+Screens: **Users** (`/users`, requests → approve/reject, level, overrides, seats, password reset),
+**Roles & Permissions** (`/roles`, the full matrix, editable), **Audit Log** (`/audit-log`), plus the
+cross-endowment registers Beneficiaries & UBO, Compliance, Calendar and Documents. The sidebar
+shows only the sections the caller may see (`whoami.sections`); every page and procedure enforces
+its own permission regardless.
+
+Designating the primary administrator (once per environment, after the person has signed up and
+enrolled their second factor; needs `ACCESS_MATRIX_DATABASE_URL`):
+
+```bash
+pnpm admin:primary <email>
+```
 
 ## Tests
 

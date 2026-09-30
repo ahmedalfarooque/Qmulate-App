@@ -390,3 +390,14 @@ export {
   searchHashEquals,
 } from './crypto.js';
 export type { FieldCryptoConfig } from './crypto.js';
+
+// ── The organisation layer (migration 55) ─────────────────────────────────────────────────────
+export {
+  resolveOrgAccess,
+  setPrimaryAdmin,
+  setUserAccessLevel,
+  setUserOverrides,
+  setUserStatus,
+  upsertAccessLevel,
+} from './org-access.js';
+export type { OrgAccess, OrgAccessQueryClient } from './org-access.js';

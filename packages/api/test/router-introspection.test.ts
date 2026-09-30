@@ -24,6 +24,7 @@
  * act rather than an omission.
  */
 
+import { ORG_SCOPE_PERMISSIONS } from '@qmulate/domain/access';
 import { readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -69,7 +70,8 @@ function walkRouter(): ProcedureFacts[] {
       .filter((tag): tag is GuardTag => tag !== undefined);
 
     const kinds = new Set<GuardKind>(tags.map((tag) => tag.kind));
-    const scopeTag = tags.find((tag) => tag.kind === 'endowment-scope');
+    const scopeTag =
+      tags.find((tag) => tag.kind === 'endowment-scope') ?? tags.find((tag) => tag.kind === 'org-scope');
 
     return { path, type: procedure._def.type, tags, kinds, permission: scopeTag?.permission };
   });
@@ -332,7 +334,7 @@ describe('the router walk', () => {
 describe('deny by default, enforced against the router', () => {
   const publicPaths = PROCEDURES.filter((p) => !p.kinds.has('authed')).map((p) => p.path);
   const unscopedAuthedPaths = PROCEDURES.filter(
-    (p) => p.kinds.has('authed') && !p.kinds.has('endowment-scope'),
+    (p) => p.kinds.has('authed') && !p.kinds.has('endowment-scope') && !p.kinds.has('org-scope'),
   ).map((p) => p.path);
 
   it('the set of PUBLIC procedures equals the written-down allowlist', () => {
@@ -375,7 +377,7 @@ describe('MP-34 — every mutation is endowment-scoped and permission-gated', ()
     // ⊕ S12-3b. An unscoped mutation is the most dangerous shape this file polices, so the set is
     // asserted EXACTLY rather than skipped: one procedure, the birth, whose reason is written above.
     const unscopedMutations = mutations
-      .filter((mutation) => !mutation.kinds.has('endowment-scope'))
+      .filter((mutation) => !mutation.kinds.has('endowment-scope') && !mutation.kinds.has('org-scope'))
       .map((mutation) => mutation.path)
       .sort();
     expect(unscopedMutations).toEqual(['onboarding.intake']);
@@ -386,7 +388,7 @@ describe('MP-34 — every mutation is endowment-scoped and permission-gated', ()
     for (const mutation of mutations) {
       if (mutation.path in UNSCOPED_AUTHED_ALLOWLIST) continue; // asserted exactly above
       expect(
-        mutation.kinds.has('endowment-scope'),
+        mutation.kinds.has('endowment-scope') || mutation.kinds.has('org-scope'),
         `${mutation.path} is a mutation with no endowment-scope guard: it would degrade to "any ` +
           `active grant on this endowment can do this", which is exactly what the force-filter ` +
           `already does — so the mistake would be invisible in behaviour AND consistent across both ` +
@@ -412,7 +414,7 @@ describe('MP-34 — every mutation is endowment-scoped and permission-gated', ()
       if (procedure.path in PUBLIC_ALLOWLIST) continue;
       if (procedure.path in UNSCOPED_AUTHED_ALLOWLIST) continue;
       expect(
-        procedure.kinds.has('endowment-scope'),
+        procedure.kinds.has('endowment-scope') || procedure.kinds.has('org-scope'),
         `${procedure.path} is an unscoped query and is not on either allowlist`,
       ).toBe(true);
     }
@@ -698,6 +700,30 @@ describe('the AML compartment rung', () => {
         verb !== undefined && !(APPROVAL_VERBS as readonly string[]).includes(verb),
         `${procedure.path} is AML-compartment-gated AND demands an approval verb`,
       ).toBe(true);
+    }
+  });
+});
+
+/**
+ * The organisation rung (migration 55): every `admin.*` procedure is built on `orgProcedure` and
+ * names one of the closed ORGANISATION-scope permissions — never an endowment permission, and
+ * never an approval verb. Visibility of the Users / Roles / Audit screens follows the same set.
+ */
+describe('migration 55 — the organisation rung', () => {
+  const orgProcedures = PROCEDURES.filter((p) => p.kinds.has('org-scope'));
+
+  it('every admin.* procedure is on the organisation rung, and nothing else is', () => {
+    const adminPaths = PROCEDURES.filter((p) => p.path.startsWith('admin.')).map((p) => p.path);
+    expect(orgProcedures.map((p) => p.path).sort()).toEqual(adminPaths.sort());
+    expect(adminPaths.length).toBeGreaterThanOrEqual(10);
+  });
+
+  it('each names a registered organisation-scope permission and no approval verb', () => {
+    for (const procedure of orgProcedures) {
+      const tag = procedure.tags.find((t) => t.kind === 'org-scope');
+      expect(tag?.permission, `${procedure.path} declares no permission`).toBeDefined();
+      expect(ORG_SCOPE_PERMISSIONS as readonly string[]).toContain(tag?.permission);
+      expect(tag?.permission?.endsWith(':approve') || tag?.permission?.endsWith(':sign')).toBe(false);
     }
   });
 });

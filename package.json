@@ -26,10 +26,11 @@
     "db:migrate": "pnpm --filter @qmulate/database run migrate:dev",
     "db:migrate:deploy": "pnpm --filter @qmulate/database run migrate:deploy",
     "db:seed": "cross-env DATA_CLASSIFICATION=fixture-only pnpm --filter @qmulate/database run seed",
-    "db:dev-admin": "cross-env DATA_CLASSIFICATION=fixture-only tsx packages/auth/src/dev-admin-setup.ts",
+    "db:dev-admin": "cross-env DATA_CLASSIFICATION=fixture-only tsx packages/auth/scripts/dev-admin-setup.ts",
     "i18n:check": "tsx scripts/check-i18n-keys.ts",
     "db:dev": "tsx scripts/dev-postgres.ts start",
-    "db:dev:stop": "tsx scripts/dev-postgres.ts stop"
+    "db:dev:stop": "tsx scripts/dev-postgres.ts stop",
+    "admin:primary": "tsx packages/auth/scripts/primary-admin-setup.ts"
   },
   "scripts_note": "db:dev starts a throwaway Postgres via embedded-postgres — this machine has no Docker. CI uses a real postgres service container instead (see scripts/README.md).",
   "devDependencies": {

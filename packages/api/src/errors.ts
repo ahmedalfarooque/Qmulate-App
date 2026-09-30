@@ -43,6 +43,12 @@ export const API_ERROR_CODES = [
    * decision 2026-07-27) — no authenticated surface is reachable without it, role or no role.
    */
   'TOTP_ENROLMENT_REQUIRED',
+  /** Registered and enrolled, but no administrator has approved the account yet (migration 55). */
+  'ACCOUNT_PENDING',
+  /** Disabled or rejected by an administrator (migration 55). */
+  'ACCOUNT_DISABLED',
+  /** The caller's access level does not carry the organisation-scope permission (migration 55). */
+  'ORG_PERMISSION_DENIED',
   /**
    * An `approve`/`sign` action needs a FRESH TOTP assertion (NFR-06 step-up) and does not have
    * one. Raised for all four fail-closed cases: no assertion recorded, an assertion older than the
@@ -205,6 +211,9 @@ export const API_ERROR_STATUS: Readonly<
 > = {
   UNAUTHENTICATED: 'UNAUTHORIZED',
   TOTP_ENROLMENT_REQUIRED: 'FORBIDDEN',
+  ACCOUNT_PENDING: 'FORBIDDEN',
+  ACCOUNT_DISABLED: 'FORBIDDEN',
+  ORG_PERMISSION_DENIED: 'FORBIDDEN',
   TOTP_STEP_UP_REQUIRED: 'FORBIDDEN',
   // NOT FORBIDDEN. Do not "fix" this — see the file header and AC-1.
   NO_GRANT: 'NOT_FOUND',

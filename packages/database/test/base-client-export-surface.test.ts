@@ -90,6 +90,21 @@ const PERMITTED_CALL_SITES: readonly { file: string; why: string }[] = [
     why: 'Comment only, and a NEGATIVE one: "never `getBasePrismaClient()`". No call.',
   },
   {
+    // ⊕ migration 55
+    file: 'packages/auth/scripts/primary-admin-setup.ts',
+    why:
+      'Operator script: looks the account up before designating it primary administrator through ' +
+      'setPrimaryAdmin() (provisioner, audited). Reads only; the write is on the provisioning path.',
+  },
+  {
+    // ⊕ migration 55
+    file: 'packages/api/src/routers/admin.ts',
+    why:
+      'The organisation screens read the authorization plane itself (users, levels, overrides, ' +
+      'grants, the audit trail) — not endowment data — behind orgProcedure(); every write goes ' +
+      'through the provisioner helpers, never through this handle.',
+  },
+  {
     file: 'packages/database/test/base-client-bypass.integration.test.ts',
     why: 'The behavioural proof. Names it in prose only; reaches it through the harness.',
   },
@@ -192,7 +207,7 @@ const PERMITTED_BOOTSTRAP_CALL_SITES: readonly { file: string; why: string }[] =
     why: 'Wraps it as `provisionGrants()` for the five files that bootstrap a test admin seat.',
   },
   {
-    file: 'packages/auth/src/dev-admin-setup.ts',
+    file: 'packages/auth/scripts/dev-admin-setup.ts',
     why:
       'The local development administrator’s seats — a fixture-only provisioning program that ' +
       'refuses to start outside DATA_CLASSIFICATION=fixture-only, same shape as the seed’s step 18.',
@@ -287,7 +302,7 @@ const PERMITTED_PRIVILEGED_CALL_SITES: readonly { file: string; why: string }[] 
     why: 'privilegedPrisma() / privilegedExtendedPrisma() — SCAFFOLDING only. Probes stay on the app connection.',
   },
   {
-    file: 'packages/auth/src/dev-admin-setup.ts',
+    file: 'packages/auth/scripts/dev-admin-setup.ts',
     why:
       'The local development administrator is provisioned on the owner connection for the seed’s ' +
       'reason: one audited transaction that lays down access-matrix seats behind ownership.',
@@ -411,6 +426,8 @@ describe('the privileged (owner) connection: who may reach it', () => {
       // S12-3b: the INTAKE door — same credential, same shape, never returns the client
       // (`intakeEndowment()` is its entire surface; migration 53 admits the birth it performs).
       'packages/database/src/intake.ts',
+      // Migration 55: registration decisions, levels, overrides — audited provisioner writes.
+      'packages/database/src/org-access.ts',
       'packages/database/test/setup.ts',
       'packages/database/test/authorization-plane-privilege.integration.test.ts',
       THIS_FILE,

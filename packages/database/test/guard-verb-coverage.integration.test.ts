@@ -94,6 +94,10 @@ const VERB_COVERAGE: readonly { table: string; covers: readonly ('I' | 'U' | 'D'
   { table: 'waqf', covers: ['I', 'U', 'D', 'T'] },
   { table: 'approval_request', covers: ['I', 'U', 'D', 'T'] },
   { table: 'waqf_access_grant', covers: ['I', 'U', 'D', 'T'] },
+  // ⊕ migration 55: the organisation columns of `user` and the last-primary-admin rule; the
+  // system access levels are edited, never renamed or deleted.
+  { table: 'user', covers: ['I', 'U', 'D'] },
+  { table: 'access_level', covers: ['U', 'D'] },
   { table: 'distribution', covers: ['I', 'U', 'T'] },
   { table: 'asset', covers: ['I', 'U', 'D', 'T'] },
   // ⚠ `trusteeship_deed` JOINS THIS TABLE WITH MIGRATION 17 (owner-decision memo Q10). It carried
@@ -235,6 +239,10 @@ const GUARD_VERB_CENSUS: readonly (readonly [string, string, string])[] = [
   // 00000000000001 / 3 — the endowment record and the founder's conditions
   // ⊕ S12-3b (migration 53): a birth needs a marker, a bound registrar and sibling authority.
   ['waqf', 'waqf_birth_admission', 'I'],
+  // 00000000000055 — the organisation layer
+  ['user', 'user_org_columns_guard', 'IU'],
+  ['user', 'user_last_primary_admin_guard', 'UD'],
+  ['access_level', 'access_level_guard', 'UD'],
   ['waqf', 'waqf_no_delete', 'D'],
   ['waqf', 'waqf_no_truncate', 'T'],
   ['waqf', 'waqf_shart_immutable', 'U'],

@@ -32,7 +32,7 @@ import { hashPassword } from 'better-auth/crypto';
 
 import { assertFixtureOnly } from '@qmulate/database/guardrail';
 
-import { DEV_ADMIN_EMAIL_VARIABLE, devAdminGrantPlan, isDevAdminExempt } from './dev-admin';
+import { DEV_ADMIN_EMAIL_VARIABLE, devAdminGrantPlan, isDevAdminExempt } from '../src/dev-admin';
 
 /** The gitignored file that receives the enrolment secret. Root of the monorepo. */
 const LOCAL_TOTP_FILE = '.dev-admin.local.json';
@@ -207,7 +207,7 @@ async function main(): Promise<void> {
   );
 
   // ── TOTP, through better-auth's own path ────────────────────────────────────────────────
-  const { getAuth } = await import('./server');
+  const { getAuth } = await import('../src/server');
   const auth = getAuth();
   const enrolled =
     (

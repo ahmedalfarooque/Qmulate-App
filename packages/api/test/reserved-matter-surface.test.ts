@@ -699,6 +699,11 @@ describe('the E3 domain codes reach the client with the right status AND their o
     expect([...API_ERROR_CODES]).toEqual([
       'UNAUTHENTICATED',
       'TOTP_ENROLMENT_REQUIRED',
+      // ⊕ migration 55 · the organisation layer: an unvetted or sidelined account, and a caller
+      // whose level lacks an organisation-scope permission. Both locales carry the copy.
+      'ACCOUNT_PENDING',
+      'ACCOUNT_DISABLED',
+      'ORG_PERMISSION_DENIED',
       'TOTP_STEP_UP_REQUIRED',
       'NO_GRANT',
       'PERMISSION_DENIED',

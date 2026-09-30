@@ -1184,6 +1184,9 @@ export const RETENTION_REMAINDER_SCAFFOLDING_GUARDS: readonly {
   trigger: string;
 }[] = [
   { table: 'setting', trigger: 'setting_no_delete' },
+  // ⊕ migration 55 — the last-primary-admin rule and the system-level rule refuse DELETE.
+  { table: 'user', trigger: 'user_last_primary_admin_guard' },
+  { table: 'access_level', trigger: 'access_level_guard' },
   { table: 'client', trigger: 'client_no_delete' },
   { table: 'waqif', trigger: 'waqif_no_delete' },
   { table: 'compliance_obligation', trigger: 'compliance_obligation_no_delete' },

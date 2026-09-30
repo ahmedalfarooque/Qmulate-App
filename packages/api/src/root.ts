@@ -24,10 +24,13 @@
 
 import { z } from 'zod';
 
+import { visibleSections } from '@qmulate/domain/access';
+
 import { canonicalJson } from '@qmulate/database';
 
 import { approveOnApprovalPlane } from './middleware/approval-plane.js';
 import { installApiAuditing } from './middleware/audit.js';
+import { adminRouter } from './routers/admin.js';
 import { beneficiaryRouter } from './routers/beneficiary.js';
 import { classificationRouter } from './routers/classification.js';
 import { deedRouter } from './routers/deed.js';
@@ -234,6 +237,7 @@ export const appRouter = router({
    */
   whoami: authedProcedure.query(({ ctx }) => ({
     userId: ctx.session.userId,
+    email: ctx.session.email,
     locale: ctx.locale,
     grants: ctx.grants.map((grant) => ({
       waqfId: grant.waqfId,
@@ -242,7 +246,21 @@ export const appRouter = router({
       amlCompartment: grant.amlCompartment,
       isBeneficiarySelf: grant.beneficiarySelfId !== null,
     })),
+    /** The organisation layer (migration 55): registration state, level, org-scope permissions. */
+    org: {
+      status: ctx.org.status,
+      isPrimaryAdmin: ctx.org.isPrimaryAdmin,
+      accessLevel: ctx.org.accessLevel,
+      permissions: [...ctx.org.permissions],
+    },
+    /** Which navigation sections this caller may see; visibility, not authority. */
+    sections: visibleSections({
+      seatPermissions: ctx.grants.flatMap((grant) => [...grant.permissions]),
+      orgPermissions: ctx.org.permissions,
+    }),
   })),
+
+  admin: adminRouter,
 
   endowment: endowmentRouter,
   beneficiary: beneficiaryRouter,

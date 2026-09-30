@@ -218,8 +218,15 @@ const DELETE_DELIBERATELY_UNGUARDED: Readonly<Record<string, string>> = {
   maintenance_ticket:
     'no amount column at all — the ṣiyāna money is a `transaction` row (guarded since migration 6) ' +
     'and the paperwork is a `document` (guarded since migration 1). Operational work-tracking.',
-  // the identity plane — reported by migration 8's header, not its subject
-  user: 'better-auth owns it; the identity plane is not this migration’s subject. REPORTED, not closed.',
+  // ⊕ migration 55 — an override is WITHDRAWN by stamping deletedAt, never deleted; DELETE is
+  // revoked from the runtime and the provisioning role by the privilege matrix, and the row holds
+  // no act, amount or endowment.
+  user_permission_override:
+    'withdrawn by stamping `deletedAt` (the audit spine refuses hard deletes); DELETE revoked from ' +
+    'every application role by the privilege matrix; no act, amount or endowment on the row.',
+  // the identity plane — reported by migration 8's header, not its subject. ⊕ `user` left this
+  // list in migration 55: `user_last_primary_admin_guard` now covers DELETE (the last primary
+  // administrator cannot be removed), so its verdict is a guard, not a report.
   account: 'better-auth credentials; deliberately excluded from the audited models. REPORTED.',
   session: 'ephemeral by design — a session that cannot be deleted is a security bug.',
   two_factor: 'better-auth TOTP secret material; lifecycle belongs to better-auth.',
