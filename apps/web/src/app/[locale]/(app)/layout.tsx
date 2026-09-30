@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 
 import { evaluateAuthGate } from '@qmulate/auth';
 
+import { shellDecision } from '@/lib/access-state';
 import { ACCESS_KEY_PREFIX, kernelMessageKey } from '@/lib/trpc/client';
 import { NavigationProvider } from '@/components/NavigationProvider';
 import { TrpcProvider } from '@/lib/trpc/provider';
@@ -77,9 +78,9 @@ export default async function AppLayout({
   }
 
   if (refusal === null && identity !== null) {
-    // Seated on at least one endowment, or holding an organisation permission (Users / Roles /
-    // Audit Log): the shell is theirs. Which items appear is decided by `identity.sections`.
-    if (identity.grants.length > 0 || identity.org.permissions.length > 0) {
+    // Seated, holding an organisation permission, assigned a level, or the primary administrator:
+    // the shell is theirs (`shellDecision`). Which items appear is decided by `identity.sections`.
+    if (shellDecision(identity) === 'shell') {
       return (
         <NavigationProvider
           value={{
@@ -92,7 +93,7 @@ export default async function AppLayout({
         </NavigationProvider>
       );
     }
-    // Approved, enrolled, and not yet seated anywhere: say exactly that.
+    // Approved, enrolled, and nothing assigned yet (no level, no seat, no permission): say exactly that.
     return <AccountStateNotice locale={locale} state="no-seat" />;
   }
 

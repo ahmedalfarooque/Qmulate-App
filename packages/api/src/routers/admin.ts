@@ -68,6 +68,25 @@ function dbRoleValues(): readonly string[] {
 /** The Nazir seat is the approval authority (ADR-0004, BR-105); it is not issued from this screen. */
 const SEATABLE_ROLES_EXCLUDED = new Set(['NAZIR']);
 
+/**
+ * Migration 55 · ORGANISATION-WIDE seat administration. `orgProcedure('admin:access_matrix:write')`
+ * has already established that the caller holds the organisation permission; the seat-scoped
+ * actor context is widened to the ONE endowment being administered so the access-matrix client's
+ * force-filter (`authorizedWaqfIds`) can see it. The database re-verifies the organisation
+ * permission in `qmulate_grant_admission()` before any grant row is admitted, so this is a
+ * visibility widening, never an authority one — and it never touches endowment DATA reads.
+ */
+function orgWideActor(ctx: Parameters<typeof toActorContext>[0], waqfId: string, procedure: string) {
+  const base = toActorContext(ctx, { procedure });
+  return {
+    ...base,
+    authorizedWaqfIds: [...new Set([...base.authorizedWaqfIds, waqfId])],
+    // The authorization-plane write policy reads the ACTOR's permissions; carry the ONE organisation
+    // permission `orgProcedure` has just established, and nothing else.
+    permissions: [...new Set([...(base.permissions ?? []), 'admin:access_matrix:write'])],
+  };
+}
+
 export const adminRouter = router({
   users: router({
     list: orgProcedure('admin:user:read')
@@ -238,6 +257,7 @@ export const adminRouter = router({
           { userId: input.userId, waqfId: input.waqfId, role: input.role },
           { permissions: [...effective], validFrom: ctx.now, validUntil: input.validUntil ?? null },
           {
+            actorContext: orgWideActor(ctx, input.waqfId, 'admin.users.seat'),
             eligibilityCheck: async () =>
               target.status === 'ACTIVE'
                 ? { eligible: true }
@@ -253,7 +273,14 @@ export const adminRouter = router({
     unseat: orgProcedure('admin:access_matrix:write')
       .input(z.object({ grantId: z.string().min(1).max(128) }))
       .mutation(async ({ ctx, input }) => {
-        const result = await revokeAccessGrant(toActorContext(ctx, { procedure: 'admin.users.unseat' }), {
+        // The grant is looked up UNSCOPED (the caller's authority is organisation-wide, not a seat)
+        // and the actor context is widened to that one endowment for the audited revocation.
+        const grant = await getBasePrismaClient().waqfAccessGrant.findUnique({
+          where: { id: input.grantId },
+          select: { waqfId: true },
+        });
+        if (grant === null) throw new ApiError('NO_GRANT', 'no such grant', { userId: ctx.session.userId });
+        const result = await revokeAccessGrant(orgWideActor(ctx, grant.waqfId, 'admin.users.unseat'), {
           grantId: input.grantId,
         });
         return result;

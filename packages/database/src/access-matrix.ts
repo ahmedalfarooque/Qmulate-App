@@ -127,6 +127,22 @@ export async function provisionAccessGrant(
   const db = createAccessMatrixPrismaClientInternal(ctx);
 
   return withAudit(db, async (tx) => {
+    // At most ONE LIVE seat per (user, endowment, role) — the partial unique index of migration 56.
+    // Seating twice is idempotent: the live seat is returned, never a second grant. A REVOKED seat
+    // is history and stays as it is (revocation is one-way, migrations 3/4); a new issue record is
+    // inserted beside it, which is exactly what that rule asks for.
+    const live = await tx.waqfAccessGrant.findFirst({
+      where: {
+        userId: input.userId,
+        waqfId: input.waqfId,
+        role: input.role as never,
+        revokedAt: null,
+        deletedAt: null,
+        OR: [{ validUntil: null }, { validUntil: { gt: new Date() } }],
+      },
+      select: { id: true },
+    });
+    if (live !== null) return { grantId: live.id };
     const created = await tx.waqfAccessGrant.create({
       data: {
         userId: input.userId,

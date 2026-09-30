@@ -2726,7 +2726,11 @@ model WaqfAccessGrant {
   createdBy String?
   deletedAt DateTime?
 
-  @@unique([userId, waqfId, role])
+  // Uniqueness is a PARTIAL index (migration 56): at most one LIVE seat per (user, endowment, role)
+  // — `waqf_access_grant_one_active_seat` WHERE revokedAt IS NULL AND deletedAt IS NULL. Prisma
+  // cannot express a partial unique, so it is hand-authored; revoked rows are history and never
+  // block a new issue record (revocation is one-way, migrations 3/4).
+  @@index([userId, waqfId, role])
   @@index([waqfId])
   @@index([userId])
   @@map("waqf_access_grant")

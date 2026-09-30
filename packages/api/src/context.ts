@@ -890,8 +890,19 @@ export async function activateGrant(
     readonly beneficiarySelfId?: string | null;
     readonly amlCompartment?: boolean;
   },
-  options: { readonly eligibilityCheck?: EligibilityCheck } = {},
+  options: {
+    readonly eligibilityCheck?: EligibilityCheck;
+    /**
+     * Migration 55 · an ORGANISATION-WIDE issuer (`orgProcedure('admin:access_matrix:write')`) may
+     * seat people on endowments it holds no seat on itself. The caller supplies the actor context
+     * it has already widened to the target endowment (`orgWideActor`); the database admission
+     * trigger re-checks the organisation permission independently, so this widens nothing the
+     * database would not verify.
+     */
+    readonly actorContext?: ActorContext;
+  } = {},
 ): Promise<{ readonly grantId: string }> {
+  const actor = options.actorContext ?? toActorContext(ctx, { procedure: 'grant.activate' });
   const check = options.eligibilityCheck ?? NOT_IMPLEMENTED_ELIGIBILITY_CHECK;
   const result = await check(candidate);
 
@@ -906,7 +917,7 @@ export async function activateGrant(
     // nobody can review is not an enforcement either. Outside any transaction, for the same reason
     // every other boundary denial is.
     const { recordEvent } = await import('@qmulate/database');
-    await recordEvent(toActorContext(ctx, { procedure: 'grant.activate' }), {
+    await recordEvent(actor, {
       action: 'ACCESS_DENIED',
       category: 'ACCESS',
       classification: 'SENSITIVE',
@@ -951,7 +962,7 @@ export async function activateGrant(
   // block. That costs nothing today (this always opened its own `auditedWrite`), and
   // `provisionAccessGrant()` THROWS if it is ever called inside one rather than silently splitting.
   const { provisionAccessGrant } = await import('@qmulate/database');
-  return provisionAccessGrant(toActorContext(ctx, { procedure: 'grant.activate' }), {
+  return provisionAccessGrant(actor, {
     userId: candidate.userId,
     waqfId: candidate.waqfId,
     role: candidate.role,
