@@ -54,6 +54,7 @@ import { readFileSync } from 'node:fs';
 import {
   assertFixtureOnly,
   assertPermittedFixturePath,
+  assertSeedTargetIsLocal,
   requestedFixturePath,
   SeedRefusedError,
 } from './guardrail.js';
@@ -131,6 +132,8 @@ async function main(): Promise<void> {
   // ── LAYER 2 OF THE RESIDENCY GUARDRAIL ────────────────────────────────────────────────────
   // First statement. No database module has been imported at this point.
   assertFixtureOnly();
+  // ⊕ One shared cloud database (2026-09-30): fixture endowments are seeded into LOCAL databases only.
+  assertSeedTargetIsLocal();
   const fixturePath = assertPermittedFixturePath(requestedFixturePath());
   const fixture: Fixture = parseFixture(JSON.parse(readFileSync(fixturePath, 'utf8')));
 

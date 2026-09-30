@@ -97,6 +97,35 @@ export const PERMITTED_FIXTURE_PATH: string = path.join(
  * @returns the validated literal `'fixture-only'`.
  * @throws {SeedRefusedError} on any other value, including `undefined`.
  */
+/**
+ * ⊕ ONE-DATABASE ARCHITECTURE (2026-09-30). The seed writes the invented `FAKE-*` fixture into
+ * whatever `MIGRATOR_DATABASE_URL` names. Since localhost, the office LAN and production now share
+ * ONE authoritative cloud database, a seed pointed at it would plant fixture endowments beside real
+ * users. The seed therefore refuses any migrator host that is not the loopback interface unless the
+ * operator states `SEED_ALLOW_REMOTE_DATABASE=1` — an explicit sentence, never a default.
+ */
+export function assertSeedTargetIsLocal(
+  url: string | undefined = process.env.MIGRATOR_DATABASE_URL,
+  allowRemote: string | undefined = process.env.SEED_ALLOW_REMOTE_DATABASE,
+): void {
+  if (allowRemote === '1') return;
+  if (url === undefined || url.trim() === '') return; // the missing-URL refusal is the seed's own
+  let host: string;
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    throw new SeedRefusedError('MIGRATOR_DATABASE_URL is not a parseable URL; refusing to seed.');
+  }
+  const local = host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+  if (!local) {
+    throw new SeedRefusedError(
+      `The seed only runs against a LOCAL database (got host "${host}"). Fixture endowments must ` +
+        'never enter the shared cloud database. Set SEED_ALLOW_REMOTE_DATABASE=1 only for a ' +
+        'throwaway remote database you own.',
+    );
+  }
+}
+
 export function assertFixtureOnly(
   raw: string | undefined = process.env.DATA_CLASSIFICATION,
 ): 'fixture-only' {

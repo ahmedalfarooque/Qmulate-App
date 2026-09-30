@@ -5,7 +5,10 @@
 # fixture-only DEV_ADMIN_* variables (one account system: no local exemption). It holds no secret
 # itself and prints none. Run from the repository root, then start the app with:
 #
-#   pnpm exec cross-env MIGRATOR_DATABASE_URL= SUPERUSER_DATABASE_URL= PGBOSS_DATABASE_URL= pnpm --filter web dev
+#   pnpm exec cross-env DATA_CLASSIFICATION=fixture-only DATA_RESIDENCY=non-ksa MIGRATOR_DATABASE_URL= SUPERUSER_DATABASE_URL= PGBOSS_DATABASE_URL= pnpm --filter web dev
+#
+# (DATA_CLASSIFICATION / DATA_RESIDENCY are NEVER read from a file — @qmulate/config/load-env — so they
+# are stated on the command line, exactly as the Vercel project states them.)
 #
 # To go back to the embedded database, restore `.env` from `.env.example` and use the
 # `scripts/dev-postgres.ts` chain documented in README.md.
@@ -26,19 +29,23 @@ foreach ($required in 'DATABASE_URL', 'ACCESS_MATRIX_DATABASE_URL') {
 $out = New-Object System.Collections.Generic.List[string]
 $seen = @{}
 foreach ($line in Get-Content $envPath) {
+  $handled = $false
   if ($line -match '^\s*([A-Z_]+)=') {
     $key = $Matches[1]
     switch ($key) {
-      'DATABASE_URL'               { $out.Add('DATABASE_URL=' + $cloud['DATABASE_URL']); $seen[$key] = $true; continue }
-      'ACCESS_MATRIX_DATABASE_URL' { $out.Add('ACCESS_MATRIX_DATABASE_URL=' + $cloud['ACCESS_MATRIX_DATABASE_URL']); $seen[$key] = $true; continue }
-      'MIGRATOR_DATABASE_URL'      { $out.Add('# ' + $line + '   # operator only; never in the web runtime'); continue }
-      'SUPERUSER_DATABASE_URL'     { $out.Add('# ' + $line + '   # operator only; never in the web runtime'); continue }
-      'PGBOSS_DATABASE_URL'        { $out.Add('# ' + $line + '   # worker only; never in the web runtime'); continue }
-      'DEV_ADMIN_EMAIL'            { $out.Add('# ' + $line + '   # retired: one account system, no local exemption'); continue }
-      'DEV_ADMIN_PASSWORD'         { $out.Add('# ' + $line + '   # retired: one account system, no local exemption'); continue }
+      'DATABASE_URL'               { $out.Add('DATABASE_URL=' + $cloud['DATABASE_URL']); $seen[$key] = $true; $handled = $true }
+      'ACCESS_MATRIX_DATABASE_URL' { $out.Add('ACCESS_MATRIX_DATABASE_URL=' + $cloud['ACCESS_MATRIX_DATABASE_URL']); $seen[$key] = $true; $handled = $true }
+      'MIGRATOR_DATABASE_URL'      { $out.Add('# ' + $line + '   # operator only; never in the web runtime'); $handled = $true }
+      'SUPERUSER_DATABASE_URL'     { $out.Add('# ' + $line + '   # operator only; never in the web runtime'); $handled = $true }
+      'PGBOSS_DATABASE_URL'        { $out.Add('# ' + $line + '   # worker only; never in the web runtime'); $handled = $true }
+      'DEV_ADMIN_EMAIL'            { $out.Add('# ' + $line + '   # retired: one account system, no local exemption'); $handled = $true }
+      'DEV_ADMIN_PASSWORD'         { $out.Add('# ' + $line + '   # retired: one account system, no local exemption'); $handled = $true }
     }
   }
-  $out.Add($line)
+  # NOTE: a PowerShell `continue` inside `switch` leaves the switch, not the foreach — an earlier
+  # version relied on it and emitted every rewritten line twice, so the localhost copy (last
+  # occurrence wins in @qmulate/config/load-env) silently kept the embedded database in use.
+  if (-not $handled) { $out.Add($line) }
 }
 foreach ($key in 'DATABASE_URL', 'ACCESS_MATRIX_DATABASE_URL') {
   if (-not $seen.ContainsKey($key)) { $out.Add($key + '=' + $cloud[$key]) }
