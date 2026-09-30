@@ -38,6 +38,19 @@ pnpm install
 cp .env.example .env                 # fixture-only values; never commit .env
 pnpm db:generate                     # Prisma client — re-run after moving the checkout
 
+**Normal local development uses the SAME cloud database as production** (one identity, one set of
+users, seats, permissions and endowments everywhere). Point `.env` at it once with the switch script,
+then start the web app directly: no embedded Postgres, and the fixture seed refuses a non-local
+database (`assertSeedTargetIsLocal`), so `FAKE-*` endowments can never land beside real users.
+
+```powershell
+.\scripts\use-cloud-db.ps1
+pnpm exec cross-env DATA_CLASSIFICATION=fixture-only DATA_RESIDENCY=non-ksa MIGRATOR_DATABASE_URL= SUPERUSER_DATABASE_URL= PGBOSS_DATABASE_URL= pnpm --filter web dev
+```
+
+The embedded-Postgres chain below is for **isolated, throwaway** databases only (tests, fixture
+exploration); it seeds the invented `FAKE-*` endowments into that local cluster and nowhere else.
+
 # Fresh local cluster → migrations → fixture seed → web app on http://localhost:3000
 pnpm exec tsx scripts/dev-postgres.ts --name manual --port 54460 --reset --run \
   "pnpm --filter @qmulate/database run migrate:deploy && pnpm run db:seed && \
