@@ -31,7 +31,7 @@ export const authClient = createAuthClient({
   ],
 });
 
-export const { signIn, signOut, signUp, useSession, twoFactor } = authClient;
+export const { signIn, signOut, signUp, useSession, twoFactor, requestPasswordReset, resetPassword } = authClient;
 
 export type AuthClient = typeof authClient;
 
@@ -53,6 +53,14 @@ export function signUpPath(locale: string): string {
 
 export function twoFactorPath(locale: string): string {
   return `/${locale}/two-factor`;
+}
+
+export function forgotPasswordPath(locale: string): string {
+  return `/${locale}/forgot-password`;
+}
+
+export function resetPasswordPath(locale: string): string {
+  return `/${locale}/reset-password`;
 }
 
 export function dashboardPath(locale: string): string {

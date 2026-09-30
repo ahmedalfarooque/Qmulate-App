@@ -7,7 +7,7 @@ import { useId, useState } from 'react';
 
 import type { FormEvent } from 'react';
 
-import { dashboardPath, signIn, signUpPath, twoFactorPath } from '@/lib/auth-client';
+import { dashboardPath, forgotPasswordPath, signIn, signUpPath, twoFactorPath } from '@/lib/auth-client';
 
 /**
  * Email + password sign-in.
@@ -107,6 +107,12 @@ export function SignInForm() {
         className="rounded-control text-body-sm text-blue-strong underline focus-visible:shadow-focus"
       >
         {t('createAccount')}
+      </Link>
+      <Link
+        href={forgotPasswordPath(locale)}
+        className="rounded-control text-body-sm text-blue-strong underline focus-visible:shadow-focus"
+      >
+        {locale === 'ar' ? 'نسيت كلمة المرور؟' : 'Forgot your password?'}
       </Link>
     </form>
   );

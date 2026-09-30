@@ -18,8 +18,16 @@ export async function GET(request: Request): Promise<Response> {
   return toNextJsHandler(getAuth()).GET(request);
 }
 
+/** Endpoints whose whole purpose is to send an email: refused up front when no transport exists. */
+const EMAIL_SENDING_PATHS = new Set([
+  '/api/auth/two-factor/send-otp',
+  '/api/auth/request-password-reset',
+  '/api/auth/forget-password',
+  '/api/auth/send-verification-email',
+]);
+
 export async function POST(request: Request): Promise<Response> {
-  if (new URL(request.url).pathname === '/api/auth/two-factor/send-otp') {
+  if (EMAIL_SENDING_PATHS.has(new URL(request.url).pathname)) {
     if (!emailOtpConfigured()) {
       return Response.json({ code: 'EMAIL_NOT_CONFIGURED', message: 'Email delivery is not configured. Ask the administrator to configure SMTP.' }, { status: 503 });
     }

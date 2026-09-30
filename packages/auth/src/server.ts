@@ -30,7 +30,7 @@ import { activeGrantWhere, activeMembershipWhere, getBasePrismaClient } from '@q
 
 import { authRateLimitOptions } from './rate-limit';
 import { isDevAdminExempt } from './dev-admin';
-import { sendEmailOtp } from './email-otp';
+import { sendAddressVerificationEmail, sendEmailOtp, sendPasswordResetEmail } from './email-otp';
 import { type RoleKey, isRoleKey, requiresTotpForDbRole, roleKeyFromDbRole } from './roles';
 
 /* ───────────────────────────────────────────────────────────────────────────────────────
@@ -114,9 +114,25 @@ function buildAuth() {
 
     emailAndPassword: {
       enabled: true,
-      // E0 only. Email verification needs a mail transport that does not exist yet; it is a
-      // pre-production requirement, not a permanent exemption.
+      /**
+       * Verification mail is sent at sign-up and the link works, but sign-in is not blocked on it
+       * yet: the accounts created before a transport existed (including the first production
+       * account) are unverified, and flipping this to `true` would lock them out until each
+       * re-requests a link. Turn it on once every live account has verified — a one-line change.
+       */
       requireEmailVerification: false,
+      sendResetPassword: ({ user, url }) => sendPasswordResetEmail({ user, url }),
+      resetPasswordTokenExpiresIn: 15 * 60,
+      revokeSessionsOnPasswordReset: true,
+    },
+
+    emailVerification: {
+      sendOnSignUp: true,
+      expiresIn: 60 * 60,
+      // Sign-up must never fail because the mail did not go out: the link can be re-requested
+      // from an authenticated session (`/send-verification-email`), where a failure IS reported.
+      sendVerificationEmail: ({ user, url }) =>
+        sendAddressVerificationEmail({ user, url }).catch(() => undefined),
     },
 
     session: {

@@ -10,7 +10,11 @@
 export {
   authClient,
   dashboardPath,
+  forgotPasswordPath,
   localeFromPathname,
+  requestPasswordReset,
+  resetPassword,
+  resetPasswordPath,
   signIn,
   signInPath,
   signOut,
