@@ -43,10 +43,32 @@ import {
   assertNoWorkerOnlyDatabaseUrls,
 } from '@qmulate/config/privileged-urls';
 
-export function register(): void {
+export async function register(): Promise<void> {
   assertNoPrivilegedDatabaseUrls('apps/web');
   // S10/T1: the queue credential (PGBOSS_DATABASE_URL) is worker-only. Not privileged in the
   // owner-credential sense, but a web service holding it can silently stop the deadline engine —
   // and "apps/web never receives it" is a control here, not a deployment hope.
   assertNoWorkerOnlyDatabaseUrls('apps/web');
+
+  // Start-up reachability: name the database this process is about to use and, if nothing answers
+  // there, say so once and loudly. Without this a local app pointed at the wrong port showed every
+  // sign-in as "email or password is incorrect". Never throws — a diagnostic, not a gate.
+  if (process.env.NEXT_RUNTIME === 'nodejs') {
+    try {
+      const { probeDatabase } = await import('@qmulate/database');
+      const probe = await probeDatabase();
+      if (probe.ok) {
+        console.warn(`[web] database ${probe.target} — reachable`);
+      } else {
+        console.error(
+          `\n[web] ✖ DATABASE UNREACHABLE at ${probe.target} (${probe.code ?? 'unknown'}: ${probe.message ?? ''})\n` +
+            '[web]   Nothing is listening where DATABASE_URL points. For local development start the\n' +
+            '[web]   documented chain:  pnpm dev:local   (embedded PostgreSQL on 127.0.0.1:54460)\n' +
+            '[web]   and check it with: pnpm dev:health\n',
+        );
+      }
+    } catch (error) {
+      console.error('[web] database probe failed to run', error instanceof Error ? error.message : error);
+    }
+  }
 }

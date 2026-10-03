@@ -87,6 +87,7 @@
     "stepUpTitle": "Confirm your identity",
     "stepUpIntro": "Re-enter your verification code to approve this action.",
     "invalidCredentials": "That email address or password is incorrect.",
+    "serviceUnavailable": "The service is temporarily unavailable. Please try again shortly.",
     "invalidTotp": "That verification code is incorrect or has expired.",
     "sessionExpired": "Your session has ended. Please sign in again.",
     "signedOut": "You have been signed out."

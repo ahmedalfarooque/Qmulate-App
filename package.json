@@ -19,6 +19,8 @@
     "test:e2e": "turbo run test:e2e",
     "test:e2e:local-fixture-only": "tsx scripts/e2e-local-fixture-only.ts",
     "dev": "turbo run dev",
+    "dev:local": "tsx scripts/dev-postgres.ts --name manual --port 54460 --run \"pnpm --filter @qmulate/database run migrate:deploy && pnpm exec cross-env MIGRATOR_DATABASE_URL= SUPERUSER_DATABASE_URL= PGBOSS_DATABASE_URL= pnpm --filter web dev\"",
+    "dev:health": "pnpm --filter @qmulate/database exec tsx scripts/dev-health.ts",
     "clean": "turbo run clean && rm -rf node_modules .turbo",
     "format": "prettier --write \"apps/**/*.{ts,tsx,js,jsx,mjs,cjs,json,css}\" \"packages/**/*.{ts,tsx,js,jsx,mjs,cjs,json,css}\" \"*.{json,js,ts}\"",
     "format:check": "prettier --check \"apps/**/*.{ts,tsx,js,jsx,mjs,cjs,json,css}\" \"packages/**/*.{ts,tsx,js,jsx,mjs,cjs,json,css}\" \"*.{json,js,ts}\"",

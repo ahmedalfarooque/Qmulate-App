@@ -402,3 +402,6 @@ export {
   applyDefaultAccessProfile,
 } from './org-access.js';
 export type { OrgAccess, OrgAccessQueryClient } from './org-access.js';
+
+/** Plain reachability probe for the configured database (web start-up, `pnpm dev:health`). */
+export { describeDatabaseTarget, isConnectionFailure, probeDatabase, type DatabaseProbe } from './health.js';

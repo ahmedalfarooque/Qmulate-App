@@ -38,18 +38,32 @@ pnpm install
 cp .env.example .env                 # fixture-only values; never commit .env
 pnpm db:generate                     # Prisma client — re-run after moving the checkout
 
-**Normal local development uses the SAME cloud database as production** (one identity, one set of
-users, seats, permissions and endowments everywhere). Point `.env` at it once with the switch script,
-then start the web app directly: no embedded Postgres, and the fixture seed refuses a non-local
-database (`assertSeedTargetIsLocal`), so `FAKE-*` endowments can never land beside real users.
+**Local development — one command, from the project root:**
 
 ```powershell
-.\scripts\use-cloud-db.ps1
-pnpm exec cross-env DATA_CLASSIFICATION=fixture-only DATA_RESIDENCY=non-ksa MIGRATOR_DATABASE_URL= SUPERUSER_DATABASE_URL= PGBOSS_DATABASE_URL= pnpm --filter web dev
+cd "D:\PROJECTS\Qmulate Web App\Qmulate-main"
+pnpm dev:local
 ```
 
-The embedded-Postgres chain below is for **isolated, throwaway** databases only (tests, fixture
-exploration); it seeds the invented `FAKE-*` endowments into that local cluster and nowhere else.
+`pnpm dev:local` starts the embedded PostgreSQL cluster on **127.0.0.1:54460** (`qmulate_dev`),
+applies any pending migration, injects the five local connection strings (so the web app can never
+start against the wrong port or against the cloud database), and serves the app on
+**http://localhost:3000**. In a second terminal, check the whole environment at a glance:
+
+```powershell
+pnpm dev:health
+```
+
+It reports four facts — PostgreSQL listening, database answering, migrations current, web server
+answering — and exits non-zero if any is false. On start-up the web app also logs the database it
+is about to use (`[web] database 127.0.0.1:54460/qmulate_dev — reachable`) and prints a loud
+`DATABASE UNREACHABLE` banner if nothing listens there; the auth API returns `503 SERVICE_UNAVAILABLE`
+for a backend failure instead of letting the sign-in form call it a wrong password.
+
+Production runs on the Supabase database through Vercel; the local embedded cluster is seeded with
+the invented `FAKE-*` fixture and never shares data with it (the seed refuses a non-local database).
+`scripts/use-cloud-db.ps1` remains available for the rare case of pointing a local checkout at the
+cloud database deliberately.
 
 # Fresh local cluster → migrations → fixture seed → web app on http://localhost:3000
 pnpm exec tsx scripts/dev-postgres.ts --name manual --port 54460 --reset --run \

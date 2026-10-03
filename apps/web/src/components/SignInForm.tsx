@@ -38,7 +38,11 @@ export function SignInForm() {
     const result = await signIn.email({ email, password });
 
     if (result.error) {
-      setError(t('invalidCredentials'));
+      // 401/4xx = the credentials were checked and refused. A 503 (the server could not reach its
+      // database), any other 5xx, or no status at all (network) is a service problem and is told
+      // as one — never dressed up as a wrong password.
+      const status = typeof result.error.status === 'number' ? result.error.status : 0;
+      setError(status === 0 || status >= 500 ? t('serviceUnavailable') : t('invalidCredentials'));
       setSubmitting(false);
       return;
     }
