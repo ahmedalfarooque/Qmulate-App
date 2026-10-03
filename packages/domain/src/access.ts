@@ -313,7 +313,7 @@ export function assertOrgScopePermissions(values: readonly string[]): OrgScopePe
 }
 
 /** The five default level keys. Rows in `access_level`; the keys are stable, the contents are not. */
-export const ACCESS_LEVEL_KEYS = ['ADMIN', 'OWNER', 'MANAGER', 'USER', 'CUSTOM'] as const;
+export const ACCESS_LEVEL_KEYS = ['ADMIN', 'OWNER', 'MANAGER', 'USER', 'CUSTOM', 'FULL'] as const;
 export type AccessLevelKey = (typeof ACCESS_LEVEL_KEYS)[number];
 
 /** Registration state of an account (mirrors the `UserStatus` enum). */

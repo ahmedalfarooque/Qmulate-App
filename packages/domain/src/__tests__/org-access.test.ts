@@ -66,7 +66,7 @@ describe('resolveOrgPermissions', () => {
       expect(isPermissionString(permission)).toBe(true);
       expect(permission.endsWith(':approve') || permission.endsWith(':sign')).toBe(false);
     }
-    expect(ACCESS_LEVEL_KEYS).toEqual(['ADMIN', 'OWNER', 'MANAGER', 'USER', 'CUSTOM']);
+    expect(ACCESS_LEVEL_KEYS).toEqual(['ADMIN', 'OWNER', 'MANAGER', 'USER', 'CUSTOM', 'FULL']);
   });
 });
 

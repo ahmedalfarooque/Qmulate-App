@@ -56,7 +56,7 @@ import {
 import { resolveOrgAccess, type OrgAccess } from '@qmulate/database';
 import { evaluateAuthGate, getServerSession, hasTotpEnrolled, type AuthGate } from '@qmulate/auth';
 import { defaultLocale, isLocale, type Locale } from '@qmulate/i18n';
-import { roleKeyFromDbRole } from '@qmulate/domain';
+import { isPermissionString, roleKeyFromDbRole } from '@qmulate/domain';
 
 import { deriveAmlCompartmentWaqfIds } from './middleware/aml.js';
 
@@ -698,13 +698,14 @@ export async function createContextForSession(
   // `authedProcedure` refuses a `totp-enrolment-required` session outright, so the set is never USED
   // in that case, and resolving it unconditionally keeps ONE code path answering "what may this
   // caller touch". An unauthenticated caller gets `[]`, and the force-filter then matches nothing.
-  const [grants, org] =
+  const [recordedGrants, org] =
     session === null
       ? [[], NO_ORG_ACCESS]
       : await Promise.all([
           resolveGrants(getBasePrismaClient(), session.userId, now),
           resolveOrgAccess(getBasePrismaClient(), session.userId),
         ]);
+  const grants = await withLevelSeats(recordedGrants, org, now);
 
   const source: ActorContextSource = {
     requestId,
@@ -874,6 +875,53 @@ export class GrantIneligibleError extends Error {
  * unaudited writes to ORDINARY audited tables are untouched, and which credential a deployed service
  * actually holds is a deployment fact. The hard gate stands: no real client data yet.
  */
+
+/**
+ * Migration 57 · LEVEL-DERIVED SEATS. An ACTIVE account whose access level is flagged
+ * `seatsAllEndowments` is treated as seated on every live endowment with the level's seat template
+ * (role + permissions, intersected with the role's preset exactly like a recorded grant). This is
+ * the "all endowments" scope the owner chose for the default FULL profile and for ADMIN: it is
+ * resolved here, per request, from the database flag — not copied into one row per endowment — so
+ * a new endowment is covered the moment it exists, and narrowing the level narrows everyone on it.
+ *
+ * A RECORDED grant on an endowment always wins over the template (an administrator's deliberate
+ * narrowing or widening of one person on one endowment is honoured). Template seats carry a
+ * `grantId` of the form `level:<levelId>` — they are not rows, and the database's reserved-matter
+ * guards (approval, access-matrix writes) keep demanding recorded authority, as before.
+ */
+async function withLevelSeats(
+  recorded: readonly ResolvedGrant[],
+  org: OrgAccess,
+  now: Date,
+): Promise<readonly ResolvedGrant[]> {
+  const level = org.accessLevel;
+  if (org.status !== 'ACTIVE' || level === null || !level.seatsAllEndowments || level.seatRole === null) {
+    return recorded;
+  }
+  const roleKey = roleKeyFromDbRole(level.seatRole);
+  const permissions = effectivePermissions(roleKey, level.seatPermissions.filter(isPermissionString));
+  const endowments = await getBasePrismaClient().waqf.findMany({
+    where: { deletedAt: null },
+    select: { id: true },
+    orderBy: { id: 'asc' },
+  });
+  const seated = new Set(recorded.map((grant) => grant.waqfId));
+  const derived: ResolvedGrant[] = endowments
+    .filter((waqf) => !seated.has(waqf.id))
+    .map((waqf) => ({
+      waqfId: waqf.id,
+      role: level.seatRole as string,
+      permissions,
+      beneficiarySelfId: null,
+      scopeRefs: [],
+      amlCompartment: false,
+      validFrom: now,
+      validUntil: null,
+      grantId: `level:${level.id}`,
+    }));
+  return derived.length === 0 ? recorded : [...recorded, ...derived];
+}
+
 export async function activateGrant(
   ctx: TrpcContext,
   candidate: GrantActivationCandidate,

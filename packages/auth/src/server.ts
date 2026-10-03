@@ -26,7 +26,7 @@ import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/a
 import { twoFactor } from 'better-auth/plugins';
 
 import { serverEnv } from '@qmulate/config/env';
-import { activeGrantWhere, activeMembershipWhere, getBasePrismaClient } from '@qmulate/database';
+import { activeGrantWhere, activeMembershipWhere, applyDefaultAccessProfile, getBasePrismaClient } from '@qmulate/database';
 
 import { authRateLimitOptions } from './rate-limit';
 import { isDevAdminExempt } from './dev-admin';
@@ -113,6 +113,28 @@ function buildAuth() {
         status: { type: 'string', input: false },
         isPrimaryAdmin: { type: 'boolean', input: false },
         accessLevelId: { type: 'string', input: false, required: false },
+      },
+    },
+    /**
+     * Migration 57 · the DEFAULT ACCESS PROFILE. A registration becomes ACTIVE with the organisation's
+     * default level the moment the user row exists; nothing waits for an administrator. The hook is
+     * fail-safe: if the profile cannot be applied (no default level yet), the account stays
+     * PENDING_APPROVAL and the failure is logged — registration itself never fails on it.
+     */
+    databaseHooks: {
+      user: {
+        create: {
+          after: async (user) => {
+            try {
+              const result = await applyDefaultAccessProfile(getBasePrismaClient(), user.id);
+              if (!result.applied) {
+                console.warn(`[auth] default access profile not applied to ${user.id}: no default level`);
+              }
+            } catch (error) {
+              console.error('[auth] default access profile failed', error instanceof Error ? error.message : error);
+            }
+          },
+        },
       },
     },
     /**

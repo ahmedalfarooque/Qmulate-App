@@ -2541,6 +2541,10 @@ model AccessLevel {
   permissions     String[] @default([])
   seatRole        Role?
   seatPermissions String[] @default([])
+  /// Migration 57: holders are seated on EVERY live endowment with the seat template (kernel-resolved).
+  seatsAllEndowments      Boolean @default(false)
+  /// Migration 57: the one level a new registration receives (partial unique index).
+  isDefaultForNewAccounts Boolean @default(false)
   isSystem        Boolean  @default(false)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @default(now())

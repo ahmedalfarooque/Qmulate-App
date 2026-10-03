@@ -399,5 +399,6 @@ export {
   setUserOverrides,
   setUserStatus,
   upsertAccessLevel,
+  applyDefaultAccessProfile,
 } from './org-access.js';
 export type { OrgAccess, OrgAccessQueryClient } from './org-access.js';
