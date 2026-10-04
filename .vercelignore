@@ -1,0 +1,33 @@
+# What `vercel --prod` uploads from a developer machine. The build needs the workspace sources,
+# the lockfile and the turbo/pnpm manifests — nothing else. Everything below is local-only or
+# reproducible and was inflating the CLI upload to ~220 MB (an aborted upload leaves no deployment).
+.git
+.pgdata
+.turbo
+.next
+**/.next
+**/dist
+**/coverage
+**/generated
+**/*.log
+.env*
+!.env.example
+.vercel
+docs
+archive
+Qmulate
+data/**/*.pdf
+.claude
+.agents
+.adal
+.aider-desk
+.augment
+.autohand
+.bob
+.codeartsdoer
+.codebuddy
+.codemaker
+.codestudio
+.cursor
+.idea
+.vscode
