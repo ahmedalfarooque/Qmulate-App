@@ -254,11 +254,22 @@ export const appRouter = router({
       permissions: [...ctx.org.permissions],
     },
     /** Which navigation sections this caller may see; visibility, not authority. */
+    // Migration 57: a level that seats its holders on every endowment opens the seat-scoped
+    // sections BEFORE the first endowment exists — the pages then show their empty states and the
+    // "Register an endowment" entry is reachable. Otherwise a fresh cloud database would show a
+    // default FULL user four sections and a 13-section application only after a registration.
     sections: visibleSections({
-      seatPermissions: ctx.grants.flatMap((grant) => [...grant.permissions]),
+      seatPermissions: [
+        ...ctx.grants.flatMap((grant) => [...grant.permissions]),
+        ...(ctx.org.status === 'ACTIVE' && ctx.org.accessLevel?.seatsAllEndowments
+          ? ctx.org.accessLevel.seatPermissions
+          : []),
+      ],
       orgPermissions: ctx.org.permissions,
       isPrimaryAdmin: ctx.org.status === 'ACTIVE' && ctx.org.isPrimaryAdmin,
     }),
+    /** Live endowments in the whole organisation — lets the dashboard tell "none registered yet" from "none in your scope". */
+    endowmentCount: ctx.liveEndowmentCount,
   })),
 
   admin: adminRouter,

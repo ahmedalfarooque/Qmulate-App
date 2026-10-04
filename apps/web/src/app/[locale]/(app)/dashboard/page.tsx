@@ -11,6 +11,7 @@ import { ComplianceBoard } from '@/components/compliance/ComplianceBoard';
 import { DashboardTiles } from '@/components/distributions/DashboardTiles';
 import { Refusal } from '@/components/endowments/Refusal';
 import { loadRollup } from '@/lib/compliance/loaders';
+import { loadIdentity } from '@/lib/admin/loaders';
 import { loadDashboardCounts } from '@/lib/distributions/loaders';
 
 import type { KpiTone, RollupLine } from '@/lib/compliance/types';
@@ -74,7 +75,7 @@ export default async function DashboardPage({
   const tNav = await getTranslations({ locale, namespace: 'nav' });
   const tBoard = await getTranslations({ locale, namespace: 'dashboard' });
 
-  const [counts, rollup] = await Promise.all([loadDashboardCounts(locale), loadRollup(locale)]);
+  const [counts, rollup, identity] = await Promise.all([loadDashboardCounts(locale), loadRollup(locale), loadIdentity(locale)]);
 
   const requested = typeof query['waqf'] === 'string' ? query['waqf'] : null;
   const boards = rollup.status === 'ok' ? rollup.value.boards : [];
@@ -107,9 +108,20 @@ export default async function DashboardPage({
           {rollup.status !== 'ok' ? (
             <Refusal locale={locale} messageKey={rollup.messageKey} />
           ) : boards.length === 0 ? (
-            <p className="text-body-sm text-mist" data-testid="qm-selector-none">
-              {tBoard('selector.none')}
-            </p>
+            <div className="flex flex-col gap-[var(--space-8)]" data-testid="qm-selector-none">
+              <p className="text-body-sm text-mist">
+                {identity.status === 'ok' && identity.value.endowmentCount === 0
+                  ? tBoard('selector.noneRegistered')
+                  : tBoard('selector.none')}
+              </p>
+              {identity.status === 'ok' &&
+              identity.value.endowmentCount === 0 &&
+              (identity.value.sections as readonly string[]).includes('onboarding') ? (
+                <Link href={`/${locale}/onboarding`} className="qm-btn self-start" data-testid="qm-register-first">
+                  {tBoard('selector.registerFirst')}
+                </Link>
+              ) : null}
+            </div>
           ) : (
             <ul className="flex flex-wrap gap-[var(--space-8)]">
               {boards.map((board) => (

@@ -332,6 +332,9 @@ export interface TrpcContext {
    * everything. There is no cached "logged-in = authorized" state (§10 §7.1).
    */
   readonly grants: readonly ResolvedGrant[];
+  /** Live endowments in the organisation, read UNSCOPED: a count, not a record; lets the UI tell
+   *  "none registered yet" from "none in your scope" (migration 57). */
+  readonly liveEndowmentCount: number;
   /**
    * The organisation layer (migration 55): registration state and the effective ORGANISATION-scope
    * permission set. Resolved for every authenticated principal; an unauthenticated caller holds
@@ -531,6 +534,7 @@ export async function createServiceSeatContext(
     locale,
     session,
     grants,
+    liveEndowmentCount: 0, // a service seat reads no endowment list
     // A service seat is not a person: it holds no organisation access (migration 55).
     org: NO_ORG_ACCESS,
     actor,
@@ -706,6 +710,8 @@ export async function createContextForSession(
           resolveOrgAccess(getBasePrismaClient(), session.userId),
         ]);
   const grants = await withLevelSeats(recordedGrants, org, now);
+  const liveEndowmentCount =
+    session === null ? 0 : await getBasePrismaClient().waqf.count({ where: { deletedAt: null } });
 
   const source: ActorContextSource = {
     requestId,
@@ -725,6 +731,7 @@ export async function createContextForSession(
     locale,
     session,
     grants,
+    liveEndowmentCount,
     org,
     actor,
     db,

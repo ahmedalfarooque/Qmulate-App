@@ -932,7 +932,9 @@
       "title": "Endowments in your scope",
       "body": "One endowment is shown at a time. The scope is your seat's own grants.",
       "current": "Showing",
-      "none": "No endowment is readable from this seat."
+      "none": "No endowment is readable from this seat.",
+      "noneRegistered": "No endowment has been registered yet. The first registration opens every endowment-based section.",
+      "registerFirst": "Register the first endowment"
     },
     "rollup": {
       "title": "All endowments in scope",
