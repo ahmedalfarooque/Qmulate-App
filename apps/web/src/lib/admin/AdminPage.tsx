@@ -34,7 +34,6 @@ export async function AdminPage({
 }) {
   const gate = await evaluateAuthGate(await headers());
   if (gate.status === 'unauthenticated') redirect(`/${locale}/sign-in`);
-  if (gate.status === 'totp-enrolment-required') redirect(`/${locale}/two-factor`);
 
   const tCommon = await getTranslations({ locale, namespace: 'common' });
   const tAdmin = await getTranslations({ locale, namespace: 'admin' });

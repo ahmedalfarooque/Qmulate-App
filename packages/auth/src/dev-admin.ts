@@ -6,11 +6,11 @@
  * WHAT THIS IS, AND WHAT IT IS NOT
  * ═══════════════════════════════════════════════════════════════════════════════════════════
  * A developer working on a fixture-only database needs one account that can reach every screen
- * without a second factor on every sign-in. The TOTP gate is UNIVERSAL by product-owner decision
- * (2026-07-27, `evaluateAuthGate`), and better-auth challenges every enrolled account at sign-in —
- * so "automatic local login" is only possible as a per-account carve-out, and a carve-out is a
- * security control. It is therefore written the way `rate-limit.ts`'s test-only relaxation is
- * written: EXPLICIT, NAMED, and FAIL-CLOSED.
+ * without a second factor on every sign-in. ⚠ SUPERSEDED IN PART (owner decision, 2026-10-13):
+ * routine sign-in is now email + password for EVERY account, so the sign-in challenge this
+ * exemption once bypassed no longer exists. What remains of the carve-out is the segregation
+ * middleware's use of it and the dev scripts; it grants nothing at sign-in. It is still written the
+ * way `rate-limit.ts`'s test-only relaxation is written: EXPLICIT, NAMED, and FAIL-CLOSED.
  *
  * The exemption is granted only when ALL of the following hold, read from `process.env` directly
  * (the same reasoning as `privileged-urls.ts`: a variable that is merely PRESENT must be decisive,

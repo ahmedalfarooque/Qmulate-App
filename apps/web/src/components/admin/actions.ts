@@ -74,6 +74,56 @@ export async function setUserOverridesAction(form: FormData): Promise<void> {
   });
 }
 
+export async function createUserAction(form: FormData): Promise<void> {
+  const locale = text(form, 'locale', 2) as 'ar' | 'en';
+  const accessLevelId = optionalText(form, 'accessLevelId', 128);
+  const initialPassword = optionalText(form, 'initialPassword', 128);
+  let created: { userId: string } | null = null;
+  try {
+    const caller = await getServerCaller(locale);
+    created = await caller.admin.users.create({
+      name: text(form, 'name', 120),
+      email: text(form, 'email', 254),
+      locale,
+      ...(accessLevelId ? { accessLevelId } : {}),
+      ...(initialPassword ? { initialPassword } : {}),
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'NEXT_REDIRECT') throw error;
+    backTo(`/${locale}/users`, { error: kernelMessageKey(error, locale) });
+  }
+  backTo(`/${locale}/users/${created.userId}`, { ok: true });
+}
+
+export async function updateUserDetailsAction(form: FormData): Promise<void> {
+  const locale = text(form, 'locale', 2);
+  const userId = text(form, 'userId', 128);
+  const email = optionalText(form, 'email', 254);
+  await run(locale, `/${locale}/users/${userId}`, async () => {
+    const caller = await getServerCaller(locale);
+    await caller.admin.users.updateDetails({
+      userId,
+      name: text(form, 'name', 120),
+      ...(email ? { email } : {}),
+    });
+  });
+}
+
+export async function removeUserAction(form: FormData): Promise<void> {
+  const locale = text(form, 'locale', 2);
+  const userId = text(form, 'userId', 128);
+  let removed = false;
+  try {
+    const caller = await getServerCaller(locale);
+    await caller.admin.users.remove({ userId });
+    removed = true;
+  } catch (error) {
+    if (error instanceof Error && error.message === 'NEXT_REDIRECT') throw error;
+    backTo(`/${locale}/users/${userId}`, { error: kernelMessageKey(error, locale) });
+  }
+  if (removed) backTo(`/${locale}/users`, { ok: true });
+}
+
 export async function requestPasswordResetAction(form: FormData): Promise<void> {
   const locale = text(form, 'locale', 2) as 'ar' | 'en';
   const userId = text(form, 'userId', 128);

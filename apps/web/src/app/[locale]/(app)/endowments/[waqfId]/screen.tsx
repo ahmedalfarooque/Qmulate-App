@@ -51,7 +51,6 @@ export async function endowmentScreenContext(
 ): Promise<EndowmentScreenContext> {
   const gate = await evaluateAuthGate(await headers());
   if (gate.status === 'unauthenticated') redirect(`/${locale}/sign-in`);
-  if (gate.status === 'totp-enrolment-required') redirect(`/${locale}/two-factor`);
 
   const endowment = await loadEndowment(locale, waqfId);
   if (endowment.status !== 'ok') return { endowment, waqifName: null };

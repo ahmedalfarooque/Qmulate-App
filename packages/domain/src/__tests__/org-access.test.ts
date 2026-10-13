@@ -6,6 +6,7 @@ import {
   ORG_SCOPE_PERMISSIONS,
   assertOrgScopePermissions,
   isPermissionString,
+  refuseUserAdminChange,
   resolveOrgPermissions,
   visibleSections,
 } from '../access.js';
@@ -67,6 +68,54 @@ describe('resolveOrgPermissions', () => {
       expect(permission.endsWith(':approve') || permission.endsWith(':sign')).toBe(false);
     }
     expect(ACCESS_LEVEL_KEYS).toEqual(['ADMIN', 'OWNER', 'MANAGER', 'USER', 'CUSTOM', 'FULL']);
+  });
+});
+
+describe('refuseUserAdminChange — the primary administrator and self-lockout safeguard', () => {
+  const primary = { id: 'u-primary', isPrimaryAdmin: true } as const;
+  const ordinary = { id: 'u-ordinary', isPrimaryAdmin: false } as const;
+
+  it('an ordinary administrator cannot disable, demote, override, re-address or remove the primary administrator', () => {
+    const actorId = 'u-other-admin';
+    expect(refuseUserAdminChange({ actorId, target: primary, change: { kind: 'status', status: 'DISABLED' } })).not.toBeNull();
+    expect(refuseUserAdminChange({ actorId, target: primary, change: { kind: 'status', status: 'REJECTED' } })).not.toBeNull();
+    expect(refuseUserAdminChange({ actorId, target: primary, change: { kind: 'level', levelKey: 'USER' } })).not.toBeNull();
+    expect(refuseUserAdminChange({ actorId, target: primary, change: { kind: 'level', levelKey: null } })).not.toBeNull();
+    expect(refuseUserAdminChange({ actorId, target: primary, change: { kind: 'overrides', count: 1 } })).not.toBeNull();
+    expect(refuseUserAdminChange({ actorId, target: primary, change: { kind: 'email' } })).not.toBeNull();
+    expect(refuseUserAdminChange({ actorId, target: primary, change: { kind: 'remove' } })).not.toBeNull();
+  });
+
+  it('a no-op on the primary administrator (still ACTIVE, still ADMIN, no overrides) is not refused', () => {
+    const actorId = 'u-other-admin';
+    expect(refuseUserAdminChange({ actorId, target: primary, change: { kind: 'status', status: 'ACTIVE' } })).toBeNull();
+    expect(refuseUserAdminChange({ actorId, target: primary, change: { kind: 'level', levelKey: 'ADMIN' } })).toBeNull();
+    expect(refuseUserAdminChange({ actorId, target: primary, change: { kind: 'overrides', count: 0 } })).toBeNull();
+  });
+
+  it('nobody disables, re-levels, overrides or removes themselves — the primary administrator included', () => {
+    for (const target of [ordinary, primary]) {
+      const actorId = target.id;
+      expect(refuseUserAdminChange({ actorId, target, change: { kind: 'status', status: 'DISABLED' } })).not.toBeNull();
+      expect(refuseUserAdminChange({ actorId, target, change: { kind: 'level', levelKey: 'ADMIN' } })).not.toBeNull();
+      expect(refuseUserAdminChange({ actorId, target, change: { kind: 'overrides', count: 2 } })).not.toBeNull();
+      expect(refuseUserAdminChange({ actorId, target, change: { kind: 'remove' } })).not.toBeNull();
+    }
+  });
+
+  it('an administrator may manage an ordinary account in every way the screen offers', () => {
+    const actorId = 'u-primary';
+    expect(refuseUserAdminChange({ actorId, target: ordinary, change: { kind: 'status', status: 'DISABLED' } })).toBeNull();
+    expect(refuseUserAdminChange({ actorId, target: ordinary, change: { kind: 'status', status: 'ACTIVE' } })).toBeNull();
+    expect(refuseUserAdminChange({ actorId, target: ordinary, change: { kind: 'level', levelKey: 'USER' } })).toBeNull();
+    expect(refuseUserAdminChange({ actorId, target: ordinary, change: { kind: 'overrides', count: 3 } })).toBeNull();
+    expect(refuseUserAdminChange({ actorId, target: ordinary, change: { kind: 'email' } })).toBeNull();
+    expect(refuseUserAdminChange({ actorId, target: ordinary, change: { kind: 'remove' } })).toBeNull();
+  });
+
+  it('a system actor (no id) is bound by the primary-administrator rules but is not "self"', () => {
+    expect(refuseUserAdminChange({ actorId: null, target: primary, change: { kind: 'remove' } })).not.toBeNull();
+    expect(refuseUserAdminChange({ actorId: null, target: ordinary, change: { kind: 'remove' } })).toBeNull();
   });
 });
 

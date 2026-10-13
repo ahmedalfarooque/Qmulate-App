@@ -70,11 +70,21 @@ const EMAIL_SENDING_PATHS = new Set([
   '/api/auth/send-verification-email',
 ]);
 
+/** The recovery entry points: their response must not depend on whether the address is registered. */
+const RECOVERY_PATHS = new Set(['/api/auth/request-password-reset', '/api/auth/forget-password']);
+
 export async function POST(request: Request): Promise<Response> {
   const path = new URL(request.url).pathname;
   if (EMAIL_SENDING_PATHS.has(path)) {
     if (!emailOtpConfigured()) {
       return Response.json({ code: 'EMAIL_NOT_CONFIGURED', message: 'Email delivery is not configured. Ask the administrator to configure SMTP.' }, { status: 503 });
+    }
+    // Password recovery answers the SAME way for a registered and an unregistered address. A delivery
+    // failure is therefore NOT translated into a 502 here: only an existing account triggers a send,
+    // so a different status on failure would tell a caller which addresses are registered. The failure
+    // is logged server-side by `sendTransactionalEmail` instead.
+    if (RECOVERY_PATHS.has(path)) {
+      return guardBackend(path, () => toNextJsHandler(getAuth()).POST(request));
     }
     return guardBackend(path, () => withEmailDeliveryStatus(() => toNextJsHandler(getAuth()).POST(request)));
   }

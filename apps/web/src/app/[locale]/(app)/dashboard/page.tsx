@@ -64,12 +64,11 @@ export default async function DashboardPage({
   const query = await searchParams;
 
   /**
-   * Deny by default. No session → sign-in. A TOTP-mandatory seat that has not enrolled →
-   * enrolment, and it cannot reach the shell by deep-linking past this (AC-E0-7).
+   * Deny by default. No session → sign-in. Sign-in is email + password (owner decision,
+   * 2026-10-13), so there is no enrolment redirect here.
    */
   const gate = await evaluateAuthGate(await headers());
   if (gate.status === 'unauthenticated') redirect(`/${locale}/sign-in`);
-  if (gate.status === 'totp-enrolment-required') redirect(`/${locale}/two-factor`);
 
   const t = await getTranslations({ locale, namespace: 'common' });
   const tNav = await getTranslations({ locale, namespace: 'nav' });

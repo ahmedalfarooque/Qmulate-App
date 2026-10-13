@@ -39,6 +39,8 @@ export function sendTransactionalEmail({ to, subject, text }: { to: string; subj
   return transport.sendMail({ from: serverEnv.SMTP_FROM, to, subject, text }).then((result) => {
     if (!result.accepted.length || result.rejected.length) throw new Error('Email delivery rejected.');
   }).catch(() => {
+    // Logged without the recipient: the operator needs to know delivery is failing, not who to.
+    console.error('[auth] transactional email delivery failed (SMTP transport error).');
     const state = delivery.getStore();
     if (state) state.failed = true;
     throw new Error('Verification email could not be delivered.');

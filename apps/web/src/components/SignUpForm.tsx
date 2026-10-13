@@ -7,16 +7,15 @@ import { useId, useState } from 'react';
 
 import type { FormEvent } from 'react';
 
-import { signIn, signInPath, signUp, twoFactorPath } from '@/lib/auth-client';
+import { dashboardPath, signIn, signInPath, signUp } from '@/lib/auth-client';
 
 /**
- * Registration — the bootstrap path for a seeded internal seat (AC-E0-7:
- * register → enrol TOTP → sign in).
+ * Registration — name, email and password, then straight to the dashboard (owner decision,
+ * 2026-10-13: no compulsory TOTP enrolment at registration or sign-in).
  *
  * Registration is NOT open self-service: a user with no `WaqfAccessGrant` can see nothing
- * (deny-by-default, §10 §1.1). Creating the account is only the first of three steps, and
- * this form deliberately routes straight into TOTP enrolment rather than into the app —
- * every internal ops seat must hold a second factor before it can reach a screen.
+ * (deny-by-default, §10 §1.1) beyond what the organisation's default access level confers.
+ * Enrolling an authenticator remains available, voluntarily, from `/two-factor`.
  *
  * ⚠ Pre-production: email verification is off (no mail transport exists yet) and this
  * route must be closed or invite-gated before any real seat is created.
@@ -48,14 +47,15 @@ export function SignUpForm() {
     }
 
     // better-auth may or may not issue a session on sign-up depending on config; sign in
-    // explicitly so the enrolment step always has one to work with.
+    // explicitly so the person always lands in the app with a session.
     const signedIn = await signIn.email({ email, password });
     if (signedIn.error) {
       router.replace(signInPath(locale));
       return;
     }
 
-    router.replace(twoFactorPath(locale));
+    // Document navigation, so the app shell renders with the fresh session cookie.
+    window.location.assign(dashboardPath(locale));
   }
 
   return (

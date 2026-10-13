@@ -11,9 +11,12 @@ import { dashboardPath, forgotPasswordPath, signIn, signUpPath } from '@/lib/aut
 /**
  * Email + password sign-in.
  *
- * When the account has TOTP enrolled, better-auth does NOT issue a session here — it
- * returns `twoFactorRedirect`, and the second factor is asserted on `/two-factor`. That
- * branch is the normal path for every internal ops seat, not an edge case (NFR-06).
+ * Routine sign-in asks for nothing but the email and the password (owner decision, 2026-10-13):
+ * the server issues the session and this form goes to the dashboard. The one exception is a
+ * deliberate STEP-UP: `/sign-in?stepUp=1` (linked from the approve / sign refusal) asks the server
+ * for a second-factor challenge, so the person can prove a recorded TOTP before an approve or sign
+ * action. In that mode better-auth returns `twoFactorRedirect` and the code is asserted on
+ * `/two-factor`. The server decides; this header only asks.
  *
  * The error surface is deliberately generic: "invalid credentials" for both a wrong
  * password and an unknown address, so the form cannot be used to enumerate who has an
@@ -35,7 +38,13 @@ export function SignInForm() {
     setError(null);
     setSubmitting(true);
 
-    const result = await signIn.email({ email, password });
+    // Step-up is requested explicitly; routine sign-in sends no header and gets a password-only session.
+    const stepUp =
+      typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('stepUp') === '1';
+    const result = await signIn.email(
+      { email, password },
+      stepUp ? { headers: { 'x-qm-step-up': 'totp' } } : undefined,
+    );
 
     if (result.error) {
       // 401/4xx = the credentials were checked and refused. A 503 (the server could not reach its

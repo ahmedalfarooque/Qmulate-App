@@ -400,6 +400,7 @@ export {
   setUserStatus,
   upsertAccessLevel,
   applyDefaultAccessProfile,
+  UserAdminChangeRefusedError,
 } from './org-access.js';
 export type { OrgAccess, OrgAccessQueryClient } from './org-access.js';
 

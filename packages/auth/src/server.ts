@@ -29,7 +29,6 @@ import { serverEnv } from '@qmulate/config/env';
 import { activeGrantWhere, activeMembershipWhere, applyDefaultAccessProfile, getBasePrismaClient } from '@qmulate/database';
 
 import { authRateLimitOptions } from './rate-limit';
-import { isDevAdminExempt } from './dev-admin';
 import { sendAddressVerificationEmail, sendEmailOtp, sendPasswordResetEmail } from './email-otp';
 import { type RoleKey, isRoleKey, requiresTotpForDbRole, roleKeyFromDbRole } from './roles';
 
@@ -184,15 +183,16 @@ function buildAuth() {
     },
 
     /**
-     * ── THE DEV-ADMIN SIGN-IN CHALLENGE BYPASS (fixture-only, one account) ──────────────────
+     * ── PASSWORD-ONLY SIGN-IN (owner decision, 2026-10-13) ──────────────────────────────────
      * better-auth runs the root `hooks.after` BEFORE every plugin's after-hooks
      * (`dist/api/dispatch.mjs`: the user handler is pushed first, plugin hooks after). The
      * twoFactor plugin's sign-in hook decides whether to swap the fresh session for a 2FA
-     * challenge by reading `ctx.context.newSession.user.twoFactorEnabled`. For the ONE account
-     * `isDevAdminExempt` names — and only under `DATA_CLASSIFICATION=fixture-only` — this clears
-     * that flag on the in-flight session object, so the plugin's own early return keeps the
-     * session. The database row is untouched (the account stays enrolled), every other account
-     * is challenged exactly as before, and with the variable absent this hook is a no-op.
+     * challenge by reading `ctx.context.newSession.user.twoFactorEnabled`. For every account this
+     * clears that flag on the in-flight session object, so the plugin's own early return keeps
+     * the session. The database row is untouched (enrolment and recovery material stay), the
+     * password, account-status and permission checks are unchanged, and a step-up sign-in can still
+     * ask for the challenge. Password RECOVERY is a separate flow and still proves control of the
+     * registered email.
      */
     hooks: {
       /**
@@ -214,6 +214,10 @@ function buildAuth() {
         }
       }),
       after: createAuthMiddleware(async (ctx) => {
+        // A second factor was really asserted on this request (a challenge or an enrolment created
+        // the session): remember WHEN, bound to that session, so step-up can tell it from a
+        // password-only session (see `getTotpAssertedAt`).
+        if (ASSERTION_PATHS.has(ctx.path)) await recordTotpAssertion(ctx);
         if (ctx.path === TOTP_VERIFY_PATH) {
           // A session is created (challenge) or refreshed (enrolment) only when the code verified.
           const accepted = ctx.context.newSession;
@@ -229,8 +233,19 @@ function buildAuth() {
           return;
         }
         if (ctx.path !== '/sign-in/email') return;
+        // Password-only sign-in (owner decision, 2026-10-13): the second factor is not a routine
+        // login step. Clearing the flag on the in-flight session object makes the twoFactor
+        // plugin's own sign-in hook return early, so the fresh session is kept. The database row
+        // is untouched: enrolment and recovery material stay as they are, and `/two-factor`
+        // remains available for voluntary enrolment and for step-up on sensitive actions.
+        //
+        // A STEP-UP sign-in (`x-qm-step-up: totp`, sent by the sign-in page when an approval needs a
+        // fresh second factor) is the one exception: the challenge is left in place, and the session
+        // that the verified code creates carries the assertion record. The header can only ever make
+        // a sign-in STRICTER, so a client gains nothing by forging or omitting it.
         const pending = ctx.context.newSession;
-        if (!pending || !isDevAdminExempt(pending.user.email)) return;
+        if (!pending) return;
+        if (isStepUpRequest(ctx)) return;
         (pending.user as { twoFactorEnabled?: boolean | null }).twoFactorEnabled = false;
       }),
     },
@@ -258,6 +273,50 @@ function buildAuth() {
 }
 
 const TOTP_VERIFY_PATH = '/two-factor/verify-totp';
+
+/** Every endpoint that, on success, creates or refreshes a session because a second factor verified. */
+const ASSERTION_PATHS = new Set([TOTP_VERIFY_PATH, '/two-factor/verify-otp', '/two-factor/verify-backup-code']);
+const STEP_UP_HEADER = 'x-qm-step-up';
+/** How long an assertion record is kept; the freshness WINDOW itself is a Setting read by the API. */
+const TOTP_ASSERTION_TTL_MS = 24 * 60 * 60 * 1000;
+
+function totpAssertionKey(sessionId: string): string {
+  return `totp-asserted:${sessionId}`;
+}
+
+type HookContext = Parameters<Parameters<typeof createAuthMiddleware>[0]>[0];
+
+function isStepUpRequest(ctx: HookContext): boolean {
+  const headers = (ctx as { headers?: Headers }).headers ?? (ctx as { request?: Request }).request?.headers;
+  return headers?.get(STEP_UP_HEADER) === 'totp';
+}
+
+async function recordTotpAssertion(ctx: HookContext): Promise<void> {
+  const accepted = ctx.context.newSession;
+  if (!accepted) return;
+  const key = totpAssertionKey(accepted.session.id);
+  await ctx.context.internalAdapter.deleteVerificationByIdentifier(key);
+  await ctx.context.internalAdapter.createVerificationValue({
+    identifier: key,
+    value: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + TOTP_ASSERTION_TTL_MS),
+  });
+}
+
+/**
+ * When a second factor was last asserted ON THIS SESSION, or `null`. A password-only sign-in
+ * asserts nothing, so its session has no record and every approve / sign procedure denies until
+ * the person completes a step-up. Fail-closed: a missing, expired or unparsable record is `null`.
+ */
+export async function getTotpAssertedAt(sessionId: string): Promise<Date | null> {
+  const row = await authPrisma.verification.findFirst({
+    where: { identifier: totpAssertionKey(sessionId), expiresAt: { gt: new Date() } },
+    select: { value: true },
+  });
+  if (row === null) return null;
+  const at = new Date(row.value);
+  return Number.isNaN(at.getTime()) ? null : at;
+}
 /** Three 30 s windows: the current one, the one skew still accepts, and a margin. */
 const TOTP_REPLAY_TTL_MS = 90_000;
 
@@ -419,11 +478,10 @@ export { activeGrantWhere, activeMembershipWhere };
  * True when the user holds at least one role for which TOTP enrolment is mandatory. Evaluated
  * on the RAW enum values so an unmapped role can never create a TOTP-exempt seat.
  *
- * ⚠ NOTE (2026-07-27): this is **no longer the enrolment gate** — `evaluateAuthGate` now gates
- * EVERY authenticated user, role or no role. This predicate survives because "which roles make
- * TOTP mandatory" is still a real policy question for step-up (`TOTP_STEP_UP_ACTIONS`) and for
- * reporting on a seat's posture. Do not reintroduce it as the gate condition: see
- * `evaluateAuthGate` for why.
+ * This is no longer a sign-in condition (owner decision, 2026-10-13: sign-in is email + password).
+ * "Which roles make TOTP mandatory" remains a policy question for step-up (`TOTP_STEP_UP_ACTIONS`)
+ * and for reporting on a seat's posture. Do not reintroduce it as the gate condition: see
+ * `evaluateAuthGate`.
  */
 export async function userRequiresTotpEnrolment(userId: string): Promise<boolean> {
   const dbRoles = await getUserDbRoles(userId);
@@ -433,8 +491,7 @@ export async function userRequiresTotpEnrolment(userId: string): Promise<boolean
 /** What a gated page should do with the current request. */
 export type AuthGate =
   | { status: 'unauthenticated' }
-  | { status: 'totp-enrolment-required'; user: AuthUser }
-  /** Registered and enrolled, but no administrator has approved the account yet (migration 55). */
+  /** Registered, but no administrator has approved the account yet (migration 55). */
   | { status: 'account-pending'; user: AuthUser }
   /** Disabled or rejected by an administrator: authenticated, refused everywhere. */
   | { status: 'account-disabled'; user: AuthUser }
@@ -451,43 +508,24 @@ export function accountStatusOf(user: unknown): 'PENDING_APPROVAL' | 'ACTIVE' | 
 /**
  * The single gate every authenticated surface calls.
  *
- * ── TOTP ENROLMENT IS UNIVERSAL (user decision, 2026-07-27) ───────────────────────────────
- * **No authenticated surface is reachable until the account has enrolled TOTP.** Not the
- * dashboard, not the portal, not a read-only seat.
- *
- * This replaced a role-conditional gate, and the reason is worth keeping. The old condition was
- * `!enrolled && userRequiresTotpEnrolment(user.id)`, i.e. gate only those holding a
- * TOTP-mandatory role. A freshly-registered account holds no grant and no membership, therefore
- * no role, therefore the gate did not fire — so a brand-new user walked straight into the app
- * shell while the sign-up screen was telling them, in both languages:
- *
- *     "Two-factor verification is required for this role.
- *      You cannot reach the application until it is enabled."
- *
- * The screen was right and the code was wrong. A gate that depends on already having been
- * granted something is also backwards for onboarding: the window in which an account has no
- * role is exactly the window before anyone has vetted it.
- *
- * Consequence, stated plainly: enrolling TOTP is now part of registration for everyone,
- * including Phase-2 portal users (`family_board`, `beneficiary`). That is a deliberate
- * tightening, not an oversight — see the deviations table in `docs/product/prd/BUILD-PLAN.md`.
- *
- * `userRequiresTotpEnrolment` is intentionally NOT consulted here any more. It remains the
- * policy predicate for step-up and posture reporting.
+ * ── NO SECOND-FACTOR CONDITION (owner decision, 2026-10-13) ───────────────────────────────
+ * Sign-in is email + password. An authenticated session is therefore not required to have enrolled,
+ * or to have asserted, a TOTP: the 2026-07-27 rule that made enrolment universal is withdrawn. What
+ * stays is everything that is NOT the second factor — the account-status states below, and every
+ * per-request grant / permission check in @qmulate/api. Approve and sign actions keep their own
+ * step-up requirement (getTotpAssertedAt): a password-only session has no assertion, so those
+ * procedures deny until the person completes a step-up.
  */
 export async function evaluateAuthGate(headers: Headers): Promise<AuthGate> {
   const session = await getServerSession(headers);
   if (session === null) return { status: 'unauthenticated' };
 
   const { user } = session;
-  // The ONE carve-out, fail-closed: `isDevAdminExempt` is false unless DATA_CLASSIFICATION is
-  // `fixture-only` AND DEV_ADMIN_EMAIL names exactly this address — see `./dev-admin.ts`.
-  if (!hasTotpEnrolled(user) && !isDevAdminExempt(user.email)) {
-    return { status: 'totp-enrolment-required', user };
-  }
+  // No second-factor condition: password-only sign-in (owner decision, 2026-10-13). Authorization
+  // does not depend on it — account status below and every per-request permission check remain.
 
-  // The registration state (migration 55), after the second factor: enrolling is part of
-  // registering, and an unvetted account is told it is waiting, not that it is refused.
+  // The registration state (migration 55): an unvetted account is told it is waiting, not that it
+  // is refused.
   const status = accountStatusOf(user);
   if (status === 'PENDING_APPROVAL') return { status: 'account-pending', user };
   if (status !== 'ACTIVE') return { status: 'account-disabled', user };

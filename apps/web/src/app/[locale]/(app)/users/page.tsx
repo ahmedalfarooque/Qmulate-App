@@ -1,9 +1,10 @@
 import { getTranslations } from 'next-intl/server';
 import Link from 'next/link';
 
+import { createUserAction } from '@/components/admin/actions';
 import { AdminPage, outcomeOf } from '@/lib/admin/AdminPage';
 import { Refusal } from '@/components/endowments/Refusal';
-import { loadUsers } from '@/lib/admin/loaders';
+import { loadLevels, loadUsers } from '@/lib/admin/loaders';
 
 import type { Metadata } from 'next';
 
@@ -38,12 +39,35 @@ export default async function UsersPage({ params, searchParams }: { params: Para
 
   return (
     <AdminPage locale={locale} section="users" title={t('usersTitle')} intro={t('usersIntro')} outcome={await outcomeOf(searchParams)}>
-      {async () => {
+      {async (identity) => {
+        const canCreate = identity.org.permissions.includes('admin:user:write');
+        const levels = canCreate ? await loadLevels(locale) : null;
         const users = await loadUsers(locale, { ...(search ? { search } : {}), ...(status ? { status } : {}) });
         if (users.status !== 'ok') return <Refusal locale={locale} messageKey={users.messageKey} />;
         const { counts } = users.value;
         return (
           <div className="flex flex-col gap-[var(--space-16)]">
+            {canCreate && (
+              <section className="qm-card flex flex-col gap-[var(--space-8)]" data-testid="qm-add-user">
+                <h3 className="qm-label">{t('addUser')}</h3>
+                <p className="text-body-sm text-mist">{t('addUserIntro')}</p>
+                <form action={createUserAction} className="flex flex-wrap gap-[var(--space-8)]">
+                  <input type="hidden" name="locale" value={locale} />
+                  <input name="name" required maxLength={120} placeholder={t('name')} className="qm-field" dir="auto" />
+                  <input name="email" type="email" required maxLength={254} placeholder={t('email')} className="qm-field qm-mono" dir="ltr" />
+                  {levels !== null && levels.status === 'ok' && (
+                    <select name="accessLevelId" defaultValue="" className="qm-field">
+                      <option value="">{t('defaultLevel')}</option>
+                      {levels.value.map((l) => (
+                        <option key={l.id} value={l.id}>{locale === 'ar' ? l.nameAr : l.nameEn} ({l.key})</option>
+                      ))}
+                    </select>
+                  )}
+                  <input name="initialPassword" type="password" minLength={12} maxLength={128} autoComplete="new-password" placeholder={t('initialPassword')} className="qm-field" dir="ltr" />
+                  <button type="submit" className="qm-btn qm-btn--primary">{t('addUser')}</button>
+                </form>
+              </section>
+            )}
             <nav aria-label={t('status')} className="flex flex-wrap gap-[var(--space-8)]">
               <Link href={`/${locale}/users`} className="qm-btn" aria-current={status === undefined ? 'page' : undefined}>
                 {t('all')}

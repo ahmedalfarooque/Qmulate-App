@@ -54,7 +54,13 @@ import {
   type ExtendedPrismaClient,
 } from '@qmulate/database';
 import { resolveOrgAccess, type OrgAccess } from '@qmulate/database';
-import { evaluateAuthGate, getServerSession, hasTotpEnrolled, type AuthGate } from '@qmulate/auth';
+import {
+  evaluateAuthGate,
+  getServerSession,
+  getTotpAssertedAt,
+  hasTotpEnrolled,
+  type AuthGate,
+} from '@qmulate/auth';
 import { defaultLocale, isLocale, type Locale } from '@qmulate/i18n';
 import { isPermissionString, roleKeyFromDbRole } from '@qmulate/domain';
 
@@ -112,9 +118,10 @@ export interface SessionContext {
   /**
    * The `AuthGate` outcome, narrowed to the two AUTHENTICATED cases.
    *
-   * The TOTP enrolment gate is UNIVERSAL (user decision 2026-07-27): every authenticated surface,
-   * including read-only and portal seats. An e2e test in `apps/web/e2e/auth-journey.spec.ts` fails
-   * if a role-conditional gate is reintroduced, so do NOT make this depend on the caller's roles.
+   * Sign-in is email + password (owner decision, 2026-10-13), so the gate no longer produces a
+   * `totp-enrolment-required` state. The variant stays in this union as a dead defence:
+   * `authedProcedure` still refuses it, so a future gate that reintroduces it cannot become an
+   * implicit "authorized". Do NOT make this depend on the caller's roles.
    */
   readonly status: 'authorized' | 'totp-enrolment-required' | 'account-pending' | 'account-disabled';
   readonly userId: string;
@@ -125,16 +132,12 @@ export interface SessionContext {
    * When the caller last asserted a TOTP factor (D-6). `null` means NO ASSERTION IS KNOWN, and
    * every `approve`/`sign` procedure then DENIES — `null` is never treated as "recent enough".
    *
-   * ⚠ WHERE THIS VALUE COMES FROM, STATED HONESTLY. better-auth's `twoFactor` plugin records no
-   * "last verified at" anywhere: with 2FA enabled, sign-in returns a `twoFactorRedirect` and NO
-   * session, and the session row is created by `verifyTOTP`. So `session.createdAt` IS the instant
-   * the factor was asserted — a server-written database column, unforgeable by a caller — and that
-   * is what {@link resolveTotpAssertedAt} reads.
-   *
-   * ⚠ CONSEQUENCE, REPORTED RATHER THAN PAPERED OVER: because `updateAge` refreshes a session
-   * WITHOUT a new assertion, `updatedAt` is deliberately NOT used — so a step-up currently requires
-   * a fresh SIGN-IN rather than a re-assert prompt. A proper step-up needs an endpoint that stamps
-   * the assertion time; that is a product gap, and the wrong "fix" for it is a wider window.
+   * ⚠ WHERE THIS VALUE COMES FROM, STATED HONESTLY. Sign-in is email + password (owner decision,
+   * 2026-10-13), so a session's `createdAt` is NO LONGER evidence that a factor was asserted. The
+   * value is a server-written assertion record, bound to the session id and stamped only when a
+   * TOTP / backup-code verification endpoint actually succeeds (`getTotpAssertedAt` in
+   * `@qmulate/auth`, read by {@link resolveTotpAssertedAt}). A password-only session therefore has
+   * `null` here, and every approve/sign procedure DENIES until the person completes a step-up.
    */
   readonly totpAssertedAt: Date | null;
   /**
@@ -147,22 +150,27 @@ export interface SessionContext {
 }
 
 /**
- * Resolves the TOTP assertion instant from a better-auth session record, FAIL-CLOSED.
+ * Resolves the TOTP assertion instant for a better-auth session record, FAIL-CLOSED.
  *
- * Returns `null` — never a guess, never `now` — when: the user has not enrolled TOTP (nothing was
- * asserted), the record has no usable `createdAt`, or the value is not a valid `Date`.
+ * Returns `null` — never a guess, never `now`, never the session's `createdAt` — when the user has
+ * not enrolled TOTP, the record carries no usable id, no assertion was recorded for that session,
+ * or the lookup fails. Only a recorded assertion (written by a successful TOTP / OTP / backup-code
+ * verification) yields a `Date`.
  *
  * Read structurally rather than through better-auth's inferred types: the plugin set widens the
  * session shape, and a typing change must not be able to turn a security check into a type error
  * that someone silences with a cast.
  */
-export function resolveTotpAssertedAt(user: unknown, sessionRecord: unknown): Date | null {
+export async function resolveTotpAssertedAt(user: unknown, sessionRecord: unknown): Promise<Date | null> {
   if (!hasTotpEnrolled(user)) return null;
   if (typeof sessionRecord !== 'object' || sessionRecord === null) return null;
-  const raw = (sessionRecord as { createdAt?: unknown }).createdAt;
-  const value = raw instanceof Date ? raw : typeof raw === 'string' ? new Date(raw) : null;
-  if (value === null || Number.isNaN(value.getTime())) return null;
-  return value;
+  const id = (sessionRecord as { id?: unknown }).id;
+  if (typeof id !== 'string' || id === '') return null;
+  try {
+    return await getTotpAssertedAt(id);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -173,10 +181,9 @@ export function resolveTotpAssertedAt(user: unknown, sessionRecord: unknown): Da
  * `roles` from the gate is deliberately DISCARDED — it is a union across every grant and membership
  * with no `waqfId` at all, and its own doc says it is a posture helper (MP-12).
  */
-export function sessionFromGate(gate: AuthGate, sessionRecord: unknown): SessionContext | null {
+export function sessionFromGate(gate: AuthGate, totpAssertedAt: Date | null): SessionContext | null {
   if (
     gate.status !== 'authorized' &&
-    gate.status !== 'totp-enrolment-required' &&
     gate.status !== 'account-pending' &&
     gate.status !== 'account-disabled'
   ) {
@@ -192,7 +199,7 @@ export function sessionFromGate(gate: AuthGate, sessionRecord: unknown): Session
     userId,
     email: typeof user.email === 'string' ? user.email : '',
     twoFactorEnabled: hasTotpEnrolled(gate.user),
-    totpAssertedAt: resolveTotpAssertedAt(gate.user, sessionRecord),
+    totpAssertedAt,
     freshUntil: null,
   };
 }
@@ -650,15 +657,13 @@ export async function resolveGrants(
  * clock read for the whole request. An unrecognised `locale` falls back to the DEFAULT (Arabic),
  * never to English — Arabic is the default locale, not a fallback (§11).
  *
- * The gate is `evaluateAuthGate(headers)` from `@qmulate/auth`, unconditionally. The TOTP enrolment
- * gate is UNIVERSAL (user decision 2026-07-27); do not reintroduce a role-conditional gate — an
- * e2e test in `apps/web/e2e/auth-journey.spec.ts` fails if you do.
+ * The gate is `evaluateAuthGate(headers)` from `@qmulate/auth`, unconditionally. Sign-in is email +
+ * password (owner decision, 2026-10-13); the gate checks account status only.
  *
  * ⚠ TWO better-auth SESSION READS PER REQUEST, AND WHY. `AuthGate` carries `user` and `roles` but
- * NOT the session record, and `totpAssertedAt` can only come from the record's `createdAt` (see
- * {@link SessionContext.totpAssertedAt}). Rather than re-implement the gate here — the one thing
- * the brief forbids, because a role-conditional gate is the bug that was just fixed — this calls
- * both and accepts the duplicate read. REPORTED: the fix is for `AuthGate.authorized` to carry the
+ * NOT the session record, and the step-up assertion is keyed by the session id (see
+ * {@link SessionContext.totpAssertedAt}). Rather than re-implement the gate here, this calls both
+ * and accepts the duplicate read. REPORTED: the fix is for `AuthGate.authorized` to carry the
  * session, which is a change to `packages/auth`.
  */
 export async function createContext(options: CreateContextOptions): Promise<TrpcContext> {
@@ -666,7 +671,11 @@ export async function createContext(options: CreateContextOptions): Promise<Trpc
     evaluateAuthGate(options.headers),
     getServerSession(options.headers),
   ]);
-  return createContextForSession(sessionFromGate(gate, sessionRecord?.session ?? null), options);
+  const assertedAt =
+    gate.status === 'unauthenticated'
+      ? null
+      : await resolveTotpAssertedAt(gate.user, sessionRecord?.session ?? null);
+  return createContextForSession(sessionFromGate(gate, assertedAt), options);
 }
 
 /**

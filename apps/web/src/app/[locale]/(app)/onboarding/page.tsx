@@ -46,7 +46,6 @@ export default async function IntakePage({
 
   const gate = await evaluateAuthGate(await headers());
   if (gate.status === 'unauthenticated') redirect(`/${locale}/sign-in`);
-  if (gate.status === 'totp-enrolment-required') redirect(`/${locale}/two-factor`);
 
   const t = await getTranslations({ locale, namespace: 'endowments' });
   const tCommon = await getTranslations({ locale, namespace: 'common' });

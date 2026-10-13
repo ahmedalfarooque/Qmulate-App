@@ -58,7 +58,6 @@ export default async function AppLayout({
 
   const gate = await evaluateAuthGate(await headers());
   if (gate.status === 'unauthenticated') redirect(`/${locale}/sign-in`);
-  if (gate.status === 'totp-enrolment-required') redirect(`/${locale}/two-factor`);
   // Migration 55: the registration state is told in its own words, not as a missing record.
   if (gate.status === 'account-pending') return <AccountStateNotice locale={locale} state="pending" />;
   if (gate.status === 'account-disabled') return <AccountStateNotice locale={locale} state="disabled" />;

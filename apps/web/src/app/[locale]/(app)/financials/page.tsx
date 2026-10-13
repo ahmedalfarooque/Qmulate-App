@@ -67,7 +67,6 @@ export default async function FinancialsPage({
   /** Deny by default — identical gate to every other app route (AC-E0-7). */
   const gate = await evaluateAuthGate(await headers());
   if (gate.status === 'unauthenticated') redirect(`/${locale}/sign-in`);
-  if (gate.status === 'totp-enrolment-required') redirect(`/${locale}/two-factor`);
 
   const t = await getTranslations({ locale, namespace: 'common' });
   const tNav = await getTranslations({ locale, namespace: 'nav' });

@@ -23,8 +23,13 @@ const E2E_RUN_NONCE = process.env.QM_E2E_RUN_NONCE ?? String(Date.now());
 /**
  * AC-E0-7 — the full authentication journey, end to end:
  *
- *     register → TOTP enrolment required → enrol → verify → signed in
- *     …then a FRESH sign-in is blocked until the TOTP challenge passes.
+ *     register → dashboard (no compulsory second factor) → optional enrol → verify
+ *     …then a FRESH sign-in is password-only, and an explicit step-up is challenged.
+ *
+ * ⚠ OWNER DECISION 2026-10-13: routine sign-in and registration no longer require OTP/TOTP. The
+ * 2026-07-27 "universal enrolment gate" assertions this file used to carry are withdrawn; what it
+ * now pins is that the server issues a password-only session, still refuses a wrong password,
+ * and still challenges when a step-up is explicitly requested.
  *
  * ⚠ WHY THIS FILE EXISTS. Sprint 1 shipped with this journey proven only BY HAND. Every
  * automated check stopped at the sign-in form's markup (`auth.spec.ts` says so in its own
@@ -111,13 +116,14 @@ async function post(
   request: APIRequestContext,
   path: string,
   data: Record<string, unknown> = {},
+  extraHeaders: Record<string, string> = {},
 ): Promise<{ status: number; body: Record<string, unknown> }> {
   // better-auth enforces an Origin check on state-changing endpoints (CSRF). A browser sets
   // that header itself; `APIRequestContext` does not, so without this every enrolment call
   // comes back 403 MISSING_OR_NULL_ORIGIN — a test artefact that looks exactly like an auth bug.
   const response = await request.post(`/api/auth${path}`, {
     data,
-    headers: { origin: BASE_URL },
+    headers: { origin: BASE_URL, ...extraHeaders },
   });
   let body: Record<string, unknown> = {};
   try {
@@ -215,7 +221,7 @@ function localeFor(projectName: string): 'ar' | 'en' {
 // than retried into looking green: CI's `retries: 1` would have masked it.
 test.setTimeout(90_000);
 
-test('AC-E0-7 · register → TOTP enrolment gate → enrol → sign in is challenged', async ({
+test('AC-E0-7 · register → dashboard without a second factor → voluntary enrol → password-only sign-in, step-up challenged', async ({
   browser,
 }, testInfo) => {
   const locale = localeFor(testInfo.project.name);
@@ -247,17 +253,15 @@ test('AC-E0-7 · register → TOTP enrolment gate → enrol → sign in is chall
     expect(afterSignUp, 'sign-up should establish a session').toBeDefined();
     expect(afterSignUp?.twoFactorEnabled ?? false).toBe(false);
 
-    // ── THE ENROLMENT GATE, for a brand-new ROLE-LESS account ───────────────────────────
-    // Promoted from a characterization assertion to a real requirement by the 2026-07-27
-    // decision. Until then the gate was role-conditional, so a fresh account — which holds no
-    // grant and no membership, hence no role — walked into the shell while the sign-up screen
-    // promised it could not. The gate is now universal, so registration alone reaches nothing.
+    // ── NO COMPULSORY SECOND FACTOR (owner decision, 2026-10-13) ────────────────────────
+    // Registration + password is enough to reach the app shell. What the account can DO is a
+    // separate question answered by its access level and grants, never by enrolment.
     expect(
       await landsOn(context, `/${locale}/dashboard`),
-      'a registered but un-enrolled account reached the dashboard',
-    ).toBe(`/${locale}/two-factor`);
+      'a registered account was bounced to enrolment — the second factor is no longer compulsory',
+    ).toBe(`/${locale}/dashboard`);
 
-    // ── enrol ───────────────────────────────────────────────────────────────────────────
+    // ── enrol (voluntary) ───────────────────────────────────────────────────────────────
     const enable = await post(request, '/two-factor/enable', { password: NEW_USER_PASSWORD });
     expect(enable.status, `enrolment failed: ${JSON.stringify(enable.body)}`).toBe(200);
 
@@ -283,7 +287,7 @@ test('AC-E0-7 · register → TOTP enrolment gate → enrol → sign in is chall
     // Enrolled: the dashboard is now reachable.
     expect(await landsOn(context, `/${locale}/dashboard`)).toBe(`/${locale}/dashboard`);
 
-    // ── THE REGRESSION THAT MATTERS: the password alone is no longer enough ─────────────
+    // ── ROUTINE SIGN-IN IS PASSWORD-ONLY, even for an enrolled account ──────────────────
     const fresh = await browser.newContext(); // clean cookie jar = a genuinely fresh sign-in
     try {
       const signIn = await post(fresh.request, '/sign-in/email', {
@@ -291,25 +295,48 @@ test('AC-E0-7 · register → TOTP enrolment gate → enrol → sign in is chall
         password: NEW_USER_PASSWORD,
       });
       expect(signIn.status).toBe(200);
-      expect(signIn.body.twoFactorRedirect, 'the password alone completed the sign-in').toBe(true);
-
-      // Not merely a UI hint: there is no usable session…
-      expect(await sessionUser(fresh.request)).toBeFalsy();
-      // …and the app refuses the half-authenticated caller.
-      expect(
-        await landsOn(fresh, `/${locale}/dashboard`),
-        'a caller owing a TOTP challenge reached the dashboard',
-      ).not.toBe(`/${locale}/dashboard`);
-
-      // Satisfy the challenge — and only now is the session real.
-      const challenge = await post(fresh.request, '/two-factor/verify-totp', {
-        code: totp(secret),
-      });
-      expect(challenge.status, `challenge failed: ${JSON.stringify(challenge.body)}`).toBe(200);
+      expect(signIn.body.twoFactorRedirect, 'routine sign-in demanded a second factor').toBeFalsy();
       expect((await sessionUser(fresh.request))?.email).toBe(email);
       expect(await landsOn(fresh, `/${locale}/dashboard`)).toBe(`/${locale}/dashboard`);
     } finally {
       await fresh.close();
+    }
+
+    // ── A WRONG PASSWORD IS STILL REFUSED ───────────────────────────────────────────────
+    const wrong = await browser.newContext();
+    try {
+      const refused = await post(wrong.request, '/sign-in/email', {
+        email,
+        password: `${NEW_USER_PASSWORD}-wrong`,
+      });
+      expect(refused.status, 'a wrong password was accepted').toBeGreaterThanOrEqual(400);
+      expect(await sessionUser(wrong.request)).toBeFalsy();
+    } finally {
+      await wrong.close();
+    }
+
+    // ── STEP-UP: an explicit request still gets the second-factor challenge ─────────────
+    const stepUp = await browser.newContext();
+    try {
+      const signIn = await post(
+        stepUp.request,
+        '/sign-in/email',
+        { email, password: NEW_USER_PASSWORD },
+        { 'x-qm-step-up': 'totp' },
+      );
+      expect(signIn.status).toBe(200);
+      expect(signIn.body.twoFactorRedirect, 'step-up sign-in was not challenged').toBe(true);
+      expect(await sessionUser(stepUp.request)).toBeFalsy();
+
+      // The enrolment code above is already spent (the replay guard refuses a reused code), so
+      // assert with the NEXT time-step's code, which the verifier's ±1 window accepts.
+      const challenge = await post(stepUp.request, '/two-factor/verify-totp', {
+        code: totp(secret, Math.floor(Date.now() / 1000) + 30),
+      });
+      expect(challenge.status, `challenge failed: ${JSON.stringify(challenge.body)}`).toBe(200);
+      expect((await sessionUser(stepUp.request))?.email).toBe(email);
+    } finally {
+      await stepUp.close();
     }
   } finally {
     await context.close();
@@ -330,7 +357,7 @@ test('AC-E0-7 · register → TOTP enrolment gate → enrol → sign in is chall
  * retry — must not fail for the wrong reason.
  * ══════════════════════════════════════════════════════════════════════════════════════ */
 
-test('NFR-06 · an operator holding a TOTP-required role is gated until enrolled', async ({
+test('NFR-06 · an operator holding a TOTP-required role signs in with email + password only', async ({
   browser,
 }, testInfo) => {
   const locale = localeFor(testInfo.project.name);
@@ -341,30 +368,10 @@ test('NFR-06 · an operator holding a TOTP-required role is gated until enrolled
     const signIn = await post(request, '/sign-in/email', SEEDED_NAZIR);
     expect(signIn.status, `seeded nazir cannot sign in: ${JSON.stringify(signIn.body)}`).toBe(200);
 
-    if (signIn.body.twoFactorRedirect === true) {
-      // Already enrolled by an earlier project/attempt: the challenge IS the gate.
-      expect(await sessionUser(request)).toBeFalsy();
-      expect(await landsOn(context, `/${locale}/dashboard`)).not.toBe(`/${locale}/dashboard`);
-      return;
-    }
-
-    // Signed in, not yet enrolled, and holding a role that mandates TOTP…
-    expect((await sessionUser(request))?.twoFactorEnabled ?? false).toBe(false);
-    // …so the app must refuse them until they enrol. This is the assertion NFR-06 rests on.
-    expect(
-      await landsOn(context, `/${locale}/dashboard`),
-      'an un-enrolled operator holding a TOTP-required role reached the dashboard',
-    ).toBe(`/${locale}/two-factor`);
-
-    const enable = await post(request, '/two-factor/enable', { password: SEEDED_NAZIR.password });
-    expect(enable.status, `enrolment failed: ${JSON.stringify(enable.body)}`).toBe(200);
-    const secret = secretFromTotpUri(enable.body.totpURI);
-
-    expect((await post(request, '/two-factor/verify-totp', { code: totp(secret) })).status).toBe(
-      200,
-    );
-
-    // Enrolled — the gate opens.
+    // Owner decision, 2026-10-13: no second factor at sign-in, whatever the account's enrolment
+    // state or role. The operator's authority comes from grants, not from the factor.
+    expect(signIn.body.twoFactorRedirect, 'routine sign-in demanded a second factor').toBeFalsy();
+    expect((await sessionUser(request))?.email).toBe(SEEDED_NAZIR.email);
     expect(await landsOn(context, `/${locale}/dashboard`)).toBe(`/${locale}/dashboard`);
   } finally {
     await context.close();
@@ -384,7 +391,9 @@ test('NFR-06 · an operator holding a TOTP-required role is gated until enrolled
  * skips straight to asserting the challenge, which is the part worth protecting.
  * ══════════════════════════════════════════════════════════════════════════════════════ */
 
-test('E0 exit · the seeded admin is a usable, TOTP-gated account', async ({ browser }) => {
+test('E0 exit · the seeded admin is a usable account that signs in with email + password', async ({
+  browser,
+}) => {
   const context = await browser.newContext();
   const request = context.request;
   try {
@@ -395,33 +404,8 @@ test('E0 exit · the seeded admin is a usable, TOTP-gated account', async ({ bro
     expect(signIn.status, `the seeded admin cannot sign in: ${JSON.stringify(signIn.body)}`).toBe(
       200,
     );
-
-    if (signIn.body.twoFactorRedirect === true) {
-      // Already enrolled by an earlier project/attempt: the gate is the assertion.
-      expect(await sessionUser(request)).toBeFalsy();
-      return;
-    }
-
+    expect(signIn.body.twoFactorRedirect, 'routine sign-in demanded a second factor').toBeFalsy();
     expect((await sessionUser(request))?.email).toBe(SEEDED_ADMIN.email);
-
-    const enable = await post(request, '/two-factor/enable', { password: SEEDED_ADMIN.password });
-    expect(enable.status, `enrolment failed: ${JSON.stringify(enable.body)}`).toBe(200);
-    const secret = secretFromTotpUri(enable.body.totpURI);
-
-    expect((await post(request, '/two-factor/verify-totp', { code: totp(secret) })).status).toBe(
-      200,
-    );
-    expect((await sessionUser(request))?.twoFactorEnabled).toBe(true);
-
-    // From here on the seeded admin is TOTP-gated like any other account.
-    const fresh = await browser.newContext();
-    try {
-      const again = await post(fresh.request, '/sign-in/email', SEEDED_ADMIN);
-      expect(again.body.twoFactorRedirect).toBe(true);
-      expect(await sessionUser(fresh.request)).toBeFalsy();
-    } finally {
-      await fresh.close();
-    }
   } finally {
     await context.close();
   }

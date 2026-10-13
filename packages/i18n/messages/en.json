@@ -1128,6 +1128,15 @@
     "backToSignIn": "Back to sign in"
   },
   "admin": {
+    "removeAccountHelp": "Removes an account that has no recorded access history. An account that ever held a seat or override cannot be deleted - disable it instead.",
+    "initialPassword": "Initial password (optional, 12+ characters)",
+    "defaultLevel": "Default level",
+    "addUserIntro": "Creates the account like a registration. Leave the password empty and the person receives a link at the registered address to choose their own; otherwise the password you type is set as given. Pick a level or keep the default.",
+    "removeAccount": "Remove this account",
+    "saveDetails": "Save details",
+    "detailsTitle": "Details",
+    "primaryAdminProtected": "The primary administrator keeps its sign-in address, level and access; they are not edited from this screen.",
+    "addUser": "Add a user",
     "usersTitle": "Users",
     "usersIntro": "Every account known to the application, its registration state, level and seats. Decisions are recorded in the audit trail.",
     "rolesTitle": "Roles & Permissions",

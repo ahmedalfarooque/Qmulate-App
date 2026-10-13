@@ -320,6 +320,76 @@ export type AccessLevelKey = (typeof ACCESS_LEVEL_KEYS)[number];
 export const USER_STATUSES = ['PENDING_APPROVAL', 'ACTIVE', 'DISABLED', 'REJECTED'] as const;
 export type UserStatus = (typeof USER_STATUSES)[number];
 
+/**
+ * A change an administrator may attempt on ANOTHER (or their own) account from the Users screen.
+ * `levelKey` is the key of the level being assigned (`null` = clearing the level).
+ */
+export type UserAdminChange =
+  | { readonly kind: 'status'; readonly status: UserStatus }
+  | { readonly kind: 'level'; readonly levelKey: string | null }
+  | { readonly kind: 'overrides'; readonly count: number }
+  | { readonly kind: 'email' }
+  | { readonly kind: 'remove' };
+
+/**
+ * THE PRIMARY ADMINISTRATOR AND SELF-LOCKOUT SAFEGUARD — one pure function, used by the API (so the
+ * refusal is a clear error) and by the database layer (so no other caller can skip it).
+ *
+ * Returns the reason a change must be REFUSED, or `null` when it may proceed.
+ *
+ *  · The primary administrator is the one account that can always administer the organisation. Its
+ *    status, level, overrides and address are therefore not an ordinary user's to change and are
+ *    not removable: it must stay ACTIVE, keep the ADMIN level (that level is what seats it on every
+ *    endowment) and keep its sign-in address. The database separately refuses to sideline the LAST
+ *    primary administrator (`user_last_primary_admin_guard`); this closes the gap above it — an
+ *    ordinary administrator demoting the primary account's LEVEL, which that guard cannot see.
+ *  · Nobody changes their own status, level or overrides, or removes themselves: an administrator
+ *    who edits themselves out of administration cannot undo it. Another administrator can.
+ */
+export function refuseUserAdminChange(input: {
+  readonly actorId: string | null;
+  readonly target: { readonly id: string; readonly isPrimaryAdmin: boolean };
+  readonly change: UserAdminChange;
+}): string | null {
+  const { actorId, target, change } = input;
+
+  if (target.isPrimaryAdmin) {
+    switch (change.kind) {
+      case 'status':
+        if (change.status !== 'ACTIVE') return 'the primary administrator must remain ACTIVE.';
+        break;
+      case 'level':
+        if (change.levelKey !== 'ADMIN') return 'the primary administrator keeps the ADMIN access level.';
+        break;
+      case 'overrides':
+        if (change.count > 0) return 'the primary administrator holds every organisation permission; overrides do not apply.';
+        break;
+      case 'email':
+        return 'the primary administrator\'s sign-in address is not edited from the Users screen.';
+      case 'remove':
+        return 'the primary administrator cannot be removed.';
+    }
+  }
+
+  if (actorId !== null && actorId === target.id) {
+    switch (change.kind) {
+      case 'status':
+        if (change.status !== 'ACTIVE') return 'an administrator does not disable or reject their own account.';
+        break;
+      case 'level':
+        return 'an administrator does not change their own access level; ask another administrator.';
+      case 'overrides':
+        return 'an administrator does not change their own permission overrides; ask another administrator.';
+      case 'remove':
+        return 'an administrator does not remove their own account.';
+      case 'email':
+        break;
+    }
+  }
+
+  return null;
+}
+
 export interface OrgAccessInput {
   readonly status: UserStatus;
   readonly isPrimaryAdmin: boolean;

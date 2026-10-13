@@ -14,6 +14,9 @@
  * administrator SEATS a person on an endowment (a grant, admitted by the trigger) — the seat then
  * carries the permissions, exactly as before.
  */
+import { randomBytes } from 'node:crypto';
+
+import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
 import {
@@ -25,11 +28,15 @@ import {
   ROLE_PRESETS,
   USER_STATUSES,
   isPermissionString,
+  refuseUserAdminChange,
   resolveGrantPermissions,
+  type UserAdminChange,
 } from '@qmulate/domain/access';
 import { DB_ROLE_TO_ROLE_KEY, getAuth } from '@qmulate/auth';
 import {
+  applyDefaultAccessProfile,
   getBasePrismaClient,
+  recordEvent,
   revokeAccessGrant,
   setUserAccessLevel,
   setUserOverrides,
@@ -85,6 +92,27 @@ function orgWideActor(ctx: Parameters<typeof toActorContext>[0], waqfId: string,
     // permission `orgProcedure` has just established, and nothing else.
     permissions: [...new Set([...(base.permissions ?? []), 'admin:access_matrix:write'])],
   };
+}
+
+/**
+ * The primary-administrator / self-lockout safeguard, applied BEFORE any write so the refusal is a
+ * clear `ORG_PERMISSION_DENIED` rather than a database error. The same rule is re-asserted inside
+ * the database layer's own writes (`refuseUserAdminChange` in `@qmulate/database`), so skipping this
+ * function cannot skip the rule. Returns the target row for the caller's use.
+ */
+async function guardUserChange(
+  ctx: { readonly session: { readonly userId: string } },
+  userId: string,
+  change: UserAdminChange,
+) {
+  const target = await getBasePrismaClient().user.findUnique({
+    where: { id: userId },
+    select: { id: true, name: true, email: true, isPrimaryAdmin: true },
+  });
+  if (target === null) throw new ApiError('NO_GRANT', 'no such user', { userId });
+  const refusal = refuseUserAdminChange({ actorId: ctx.session.userId, target, change });
+  if (refusal !== null) throw new ApiError('ORG_PERMISSION_DENIED', refusal, { userId: ctx.session.userId });
+  return target;
 }
 
 export const adminRouter = router({
@@ -181,11 +209,7 @@ export const adminRouter = router({
         }),
       )
       .mutation(async ({ ctx, input }) => {
-        if (input.userId === ctx.session.userId && input.status !== 'ACTIVE') {
-          throw new ApiError('ORG_PERMISSION_DENIED', 'an administrator does not disable or reject their own account.', {
-            userId: ctx.session.userId,
-          });
-        }
+        await guardUserChange(ctx, input.userId, { kind: 'status', status: input.status });
         await setUserStatus(toActorContext(ctx, { procedure: 'admin.users.setStatus' }), {
           userId: input.userId,
           status: input.status,
@@ -197,6 +221,11 @@ export const adminRouter = router({
     setAccessLevel: orgProcedure('admin:user:write')
       .input(z.object({ userId, accessLevelId: levelId.nullable() }))
       .mutation(async ({ ctx, input }) => {
+        const level =
+          input.accessLevelId === null
+            ? null
+            : await getBasePrismaClient().accessLevel.findUnique({ where: { id: input.accessLevelId }, select: { key: true } });
+        await guardUserChange(ctx, input.userId, { kind: 'level', levelKey: level?.key ?? null });
         await setUserAccessLevel(toActorContext(ctx, { procedure: 'admin.users.setAccessLevel' }), input);
         return { ok: true as const };
       }),
@@ -209,7 +238,156 @@ export const adminRouter = router({
         }),
       )
       .mutation(async ({ ctx, input }) => {
+        await guardUserChange(ctx, input.userId, { kind: 'overrides', count: input.overrides.length });
         await setUserOverrides(toActorContext(ctx, { procedure: 'admin.users.setOverrides' }), input);
+        return { ok: true as const };
+      }),
+
+    /**
+     * Adds an account. The new user exists exactly as a self-registered one does (the same auth
+     * library path, so the default access profile applies); the administrator may pick a level.
+     * No password is ever chosen FOR a person: either the administrator types an initial password
+     * (never stored or logged here), or - the default - an unguessable one is set and discarded and
+     * the person receives a password-reset link to the registered address, proving control of it.
+     */
+    create: orgProcedure('admin:user:write')
+      .input(
+        z.object({
+          name: z.string().trim().min(1).max(120),
+          email: z.string().trim().toLowerCase().email().max(254),
+          accessLevelId: levelId.optional(),
+          initialPassword: z.string().min(12).max(128).optional(),
+          locale: z.enum(['ar', 'en']).default('ar'),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        const db = getBasePrismaClient();
+        if ((await db.user.findUnique({ where: { email: input.email }, select: { id: true } })) !== null) {
+          throw new TRPCError({ code: 'CONFLICT', message: 'an account with that email address already exists' });
+        }
+        const generated = input.initialPassword === undefined;
+        const password = input.initialPassword ?? randomBytes(32).toString('base64url');
+        const created = await getAuth().api.signUpEmail({ body: { name: input.name, email: input.email, password } });
+        const newUserId = created.user.id;
+        // Sign-up opens a session for the new account; an administrator creating it must not leave a
+        // live session for a person who has not signed in.
+        await db.session.deleteMany({ where: { userId: newUserId } });
+        // Idempotent: the registration hook has normally applied the default profile already.
+        await applyDefaultAccessProfile(db, newUserId);
+        if (input.accessLevelId !== undefined) {
+          await setUserAccessLevel(toActorContext(ctx, { procedure: 'admin.users.create' }), {
+            userId: newUserId,
+            accessLevelId: input.accessLevelId,
+          });
+        }
+        let resetEmailSent = false;
+        if (generated) {
+          try {
+            await getAuth().api.requestPasswordReset({
+              body: { email: input.email, redirectTo: `${serverEnv.BETTER_AUTH_URL}/${input.locale}/reset-password` },
+            });
+            resetEmailSent = true;
+          } catch {
+            // Mail not configured or refused: the account exists; the administrator re-sends from its page.
+          }
+        }
+        await recordEvent(toActorContext(ctx, { procedure: 'admin.users.create' }), {
+          action: 'CREATE',
+          category: 'MUTATION',
+          classification: 'SENSITIVE',
+          entityType: 'User',
+          entityId: newUserId,
+          extraContext: {
+            operation: 'ADMIN_CREATE_ACCOUNT',
+            passwordSetBy: generated ? 'account holder, through a reset link' : 'administrator',
+            accessLevelId: input.accessLevelId ?? null,
+          },
+        });
+        return { userId: newUserId, resetEmailSent };
+      }),
+
+    /** Edits a person's display name and sign-in address. Changing the address clears its verification. */
+    updateDetails: orgProcedure('admin:user:write')
+      .input(
+        z.object({
+          userId,
+          name: z.string().trim().min(1).max(120).optional(),
+          email: z.string().trim().toLowerCase().email().max(254).optional(),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        const db = getBasePrismaClient();
+        const current = await db.user.findUnique({ where: { id: input.userId }, select: { name: true, email: true } });
+        if (current === null) throw new ApiError('NO_GRANT', 'no such user', { userId: input.userId });
+        const changingEmail = input.email !== undefined && input.email !== current.email;
+        await guardUserChange(ctx, input.userId, changingEmail ? { kind: 'email' } : { kind: 'overrides', count: 0 });
+        if (changingEmail && input.email !== undefined) {
+          const taken = await db.user.findUnique({ where: { email: input.email }, select: { id: true } });
+          if (taken !== null) throw new TRPCError({ code: 'CONFLICT', message: 'an account with that email address already exists' });
+        }
+        const data: { name?: string; email?: string; emailVerified?: boolean } = {};
+        const fields: string[] = [];
+        if (input.name !== undefined && input.name !== current.name) {
+          data.name = input.name;
+          fields.push('name');
+        }
+        if (changingEmail && input.email !== undefined) {
+          data.email = input.email;
+          data.emailVerified = false;
+          fields.push('email');
+        }
+        if (fields.length === 0) return { ok: true as const, changed: [] as string[] };
+        await db.user.update({ where: { id: input.userId }, data });
+        await recordEvent(toActorContext(ctx, { procedure: 'admin.users.updateDetails' }), {
+          action: 'UPDATE',
+          category: 'MUTATION',
+          classification: 'SENSITIVE',
+          entityType: 'User',
+          entityId: input.userId,
+          extraContext: { operation: 'ADMIN_EDIT_DETAILS', fields },
+        });
+        return { ok: true as const, changed: fields };
+      }),
+
+    /**
+     * Removes an account that has no recorded history. An account that ever held a seat, a
+     * membership or an override is part of the access trail the database keeps (those rows cannot
+     * be deleted), so it is refused with the instruction to DISABLE it - which removes every
+     * ability to sign in and keeps the record. The primary administrator and the caller's own
+     * account are never removable.
+     */
+    remove: orgProcedure('admin:user:write')
+      .input(z.object({ userId }))
+      .mutation(async ({ ctx, input }) => {
+        await guardUserChange(ctx, input.userId, { kind: 'remove' });
+        const db = getBasePrismaClient();
+        const [grants, memberships, overrides] = await Promise.all([
+          db.waqfAccessGrant.count({ where: { userId: input.userId } }),
+          db.membership.count({ where: { userId: input.userId } }),
+          db.userPermissionOverride.count({ where: { userId: input.userId } }),
+        ]);
+        if (grants + memberships + overrides > 0) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: 'this account has recorded access history and cannot be deleted; disable it instead',
+          });
+        }
+        await recordEvent(toActorContext(ctx, { procedure: 'admin.users.remove' }), {
+          action: 'UPDATE',
+          category: 'MUTATION',
+          classification: 'SENSITIVE',
+          entityType: 'User',
+          entityId: input.userId,
+          extraContext: { operation: 'ADMIN_REMOVE_ACCOUNT' },
+        });
+        try {
+          await db.user.delete({ where: { id: input.userId } });
+        } catch {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: 'this account is referenced by other records and cannot be deleted; disable it instead',
+          });
+        }
         return { ok: true as const };
       }),
 

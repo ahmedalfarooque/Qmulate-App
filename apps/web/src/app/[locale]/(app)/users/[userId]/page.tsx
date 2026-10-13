@@ -2,12 +2,14 @@ import { getTranslations } from 'next-intl/server';
 import Link from 'next/link';
 
 import {
+  removeUserAction,
   requestPasswordResetAction,
   seatUserAction,
   setUserLevelAction,
   setUserOverridesAction,
   setUserStatusAction,
   unseatUserAction,
+  updateUserDetailsAction,
 } from '@/components/admin/actions';
 import { AdminPage, outcomeOf } from '@/lib/admin/AdminPage';
 import { Refusal } from '@/components/endowments/Refusal';
@@ -42,6 +44,7 @@ export default async function UserDetailPage({ params, searchParams }: { params:
         const orgPermissions = catalog?.status === 'ok' ? catalog.value.orgPermissions : [];
         const overrideOf = new Map(u.permissionOverrides.map((o) => [o.permission, o.effect]));
         const name = (l: { nameAr: string; nameEn: string | null }) => (locale === 'ar' ? l.nameAr : (l.nameEn ?? l.nameAr));
+        const isSelf = u.id === identity.userId;
         const hidden = (
           <>
             <input type="hidden" name="locale" value={locale} />
@@ -88,20 +91,38 @@ export default async function UserDetailPage({ params, searchParams }: { params:
               )}
             </section>
 
+            {canWrite && (
+              <section className="qm-card flex flex-col gap-[var(--space-8)]" data-testid="qm-user-details">
+                <h3 className="qm-label">{t('detailsTitle')}</h3>
+                <form action={updateUserDetailsAction} className="flex flex-wrap gap-[var(--space-8)]">{hidden}
+                  <input name="name" defaultValue={u.name} required maxLength={120} className="qm-field" dir="auto" aria-label={t('name')} />
+                  <input name="email" type="email" defaultValue={u.email} maxLength={254} className="qm-field qm-mono" dir="ltr" aria-label={t('email')} readOnly={u.isPrimaryAdmin} />
+                  <button type="submit" className="qm-btn qm-btn--primary">{t('saveDetails')}</button>
+                </form>
+                {u.isPrimaryAdmin && <p className="text-body-sm text-mist">{t('primaryAdminProtected')}</p>}
+                {!u.isPrimaryAdmin && !isSelf && (
+                  <form action={removeUserAction} className="flex flex-col gap-[var(--space-4)]">{hidden}
+                    <p className="text-body-sm text-mist">{t('removeAccountHelp')}</p>
+                    <button type="submit" className="qm-btn self-start" data-testid="qm-remove">{t('removeAccount')}</button>
+                  </form>
+                )}
+              </section>
+            )}
+
             {canWrite && levels.status === 'ok' && (
               <section className="qm-card flex flex-col gap-[var(--space-8)]">
                 <h3 className="qm-label">{t('level')}</h3>
                 <form action={setUserLevelAction} className="flex gap-[var(--space-8)]">{hidden}
-                  <select name="accessLevelId" defaultValue={u.accessLevel?.id ?? ''} className="qm-field" data-testid="qm-level-select" disabled={u.isPrimaryAdmin}>
+                  <select name="accessLevelId" defaultValue={u.accessLevel?.id ?? ''} className="qm-field" data-testid="qm-level-select" disabled={u.isPrimaryAdmin || isSelf}>
                     <option value="">{t('noLevel')}</option>
                     {levels.value.map((l) => <option key={l.id} value={l.id}>{name(l)} ({l.key})</option>)}
                   </select>
-                  <button type="submit" className="qm-btn qm-btn--primary" disabled={u.isPrimaryAdmin}>{t('saveLevel')}</button>
+                  <button type="submit" className="qm-btn qm-btn--primary" disabled={u.isPrimaryAdmin || isSelf}>{t('saveLevel')}</button>
                 </form>
               </section>
             )}
 
-            {canWrite && !u.isPrimaryAdmin && (
+            {canWrite && !u.isPrimaryAdmin && !isSelf && (
               <section className="qm-card flex flex-col gap-[var(--space-8)]">
                 <h3 className="qm-label">{t('overridesTitle')}</h3>
                 <p className="text-body-sm text-mist">{t('overridesIntro')}</p>

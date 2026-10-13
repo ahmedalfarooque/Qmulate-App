@@ -11,6 +11,7 @@ import { randomUUID } from 'node:crypto';
 import {
   ACCESS_LEVEL_KEYS,
   assertOrgScopePermissions,
+  refuseUserAdminChange,
   resolveOrgPermissions,
   type OrgScopePermission,
   type UserStatus,
@@ -145,6 +146,18 @@ function assertNotInsideAuditTransaction(operation: string): void {
   }
 }
 
+/**
+ * Raised when a change would breach the primary-administrator / self-lockout safeguard
+ * (`refuseUserAdminChange`). The API checks first and answers with a clear refusal; this is the
+ * layer underneath, so a caller that skips the API cannot skip the rule.
+ */
+export class UserAdminChangeRefusedError extends Error {
+  constructor(reason: string) {
+    super(`user administration refused: ${reason}`);
+    this.name = 'UserAdminChangeRefusedError';
+  }
+}
+
 export interface SetUserStatusInput {
   readonly userId: string;
   readonly status: UserStatus;
@@ -157,6 +170,11 @@ export async function setUserStatus(ctx: RequestContext, input: SetUserStatusInp
   assertNotInsideAuditTransaction('setUserStatus');
   const db = createAccessMatrixPrismaClientInternal(ctx);
   await withAudit(db, async (tx) => {
+    const target = await tx.user.findUnique({ where: { id: input.userId }, select: { id: true, isPrimaryAdmin: true } });
+    if (target !== null) {
+      const refusal = refuseUserAdminChange({ actorId: ctx.actorId, target, change: { kind: 'status', status: input.status } });
+      if (refusal !== null) throw new UserAdminChangeRefusedError(refusal);
+    }
     await tx.user.update({
       where: { id: input.userId },
       data: { status: input.status, statusChangedAt: new Date(), statusReason: input.reason ?? null },
@@ -174,6 +192,19 @@ export async function setUserAccessLevel(ctx: RequestContext, input: SetUserAcce
   assertNotInsideAuditTransaction('setUserAccessLevel');
   const db = createAccessMatrixPrismaClientInternal(ctx);
   await withAudit(db, async (tx) => {
+    const target = await tx.user.findUnique({ where: { id: input.userId }, select: { id: true, isPrimaryAdmin: true } });
+    if (target !== null) {
+      const level =
+        input.accessLevelId === null
+          ? null
+          : await tx.accessLevel.findUnique({ where: { id: input.accessLevelId }, select: { key: true } });
+      const refusal = refuseUserAdminChange({
+        actorId: ctx.actorId,
+        target,
+        change: { kind: 'level', levelKey: level?.key ?? null },
+      });
+      if (refusal !== null) throw new UserAdminChangeRefusedError(refusal);
+    }
     await tx.user.update({ where: { id: input.userId }, data: { accessLevelId: input.accessLevelId } });
   });
 }
@@ -191,6 +222,15 @@ export async function setUserOverrides(ctx: RequestContext, input: SetUserOverri
   assertOrgScopePermissions(input.overrides.map((o) => o.permission));
   const db = createAccessMatrixPrismaClientInternal(ctx);
   await withAudit(db, async (tx) => {
+    const target = await tx.user.findUnique({ where: { id: input.userId }, select: { id: true, isPrimaryAdmin: true } });
+    if (target !== null) {
+      const refusal = refuseUserAdminChange({
+        actorId: ctx.actorId,
+        target,
+        change: { kind: 'overrides', count: input.overrides.length },
+      });
+      if (refusal !== null) throw new UserAdminChangeRefusedError(refusal);
+    }
     const existing = await tx.userPermissionOverride.findMany({
       where: { userId: input.userId },
       select: { id: true, permission: true, effect: true, deletedAt: true },

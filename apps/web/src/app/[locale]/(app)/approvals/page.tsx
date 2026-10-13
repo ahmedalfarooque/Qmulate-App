@@ -53,7 +53,6 @@ export default async function ApprovalsPage({ params }: { params: Promise<{ loca
 
   const gate = await evaluateAuthGate(await headers());
   if (gate.status === 'unauthenticated') redirect(`/${locale}/sign-in`);
-  if (gate.status === 'totp-enrolment-required') redirect(`/${locale}/two-factor`);
 
   const t = await getTranslations({ locale, namespace: 'distribution' });
   const tNav = await getTranslations({ locale, namespace: 'nav' });
